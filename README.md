@@ -15,3 +15,7 @@ Added filtering to pedal input
 
 Bug fixes and general clean ups.
 
+Update - 31.12.23
+
+Adding JK BMS code 
+
