@@ -44,7 +44,14 @@ signed long loopTime = 0;
 void canRX_289(const CAN_message_t &msg); // Inverter RPM, Battery and Torque
 void canRX_299(const CAN_message_t &msg); // Inverter Temps
 void canRX_351(const CAN_message_t &msg); // BMS Status
-void canRX_355(const CAN_message_t &msg); // BMS Status
+// void canRX_355(const CAN_message_t &msg); // BMS Status
+void canRX_001(const CAN_message_t &msg); // BMS Status *
+void canRX_002(const CAN_message_t &msg); // BMS Status *
+void canRX_003(const CAN_message_t &msg); // BMS Status *
+void canRX_004(const CAN_message_t &msg); // BMS Status *
+void canRX_005(const CAN_message_t &msg); // BMS Status *
+void canRX_006(const CAN_message_t &msg); // BMS Status * 
+void canRX_007(const CAN_message_t &msg); // BMS Status *
 void canRX_356(const CAN_message_t &msg); // BMS HV Voltage
 void canRX_377(const CAN_message_t &msg); // Outlander Charger Low voltage stats
 void canRX_389(const CAN_message_t &msg); // Outlander Charger HV stats
@@ -54,10 +61,13 @@ void dashComms();                         // update the dash-board
 void bmsComms();                          // Comms to the BMS - Set Key on
 
 void dogFood();
+void BMS_Stat(); //*
+void BMS_Read(); //*
 void menu();
 void readPins();
 void readPedal();
 void inverterComms();
+void EvseStart(); //*
 void tempCheck();
 void showInfo();
 void loadDefault();
@@ -73,10 +83,14 @@ Metro timer100_1 = Metro(100);   // 2nd inverter timer
 Metro timer100_2 = Metro(96);    // longer Debounce
 Metro timer100_3 = Metro(110);   // Temp handler
 Metro timer500_1 = Metro(50);    // pedal debug timer
+Metro timer5_1 = Metro(5);    // BMS_Stat *
+Metro timer1000_3 = Metro(3000);    // BMS_Stat *
+Metro timer1000_2 = Metro(1000);    // BMS_Stat *
 Metro timer1000_1 = Metro(1000); // General 1s timer
 Metro timer2000_1 = Metro(2000); // Serial update timer
 Metro timer30s_1 = Metro(30000); // 30Sec Timer to check DC-DC State
 Metro timer10_1 = Metro(10);     // Dash coms timer - needs to be fast for stepper motor
+Metro timer20_1 = Metro(20);     // Dash coms timer - needs to be fast for stepper motor *
 
 // Watchdog Setup
 WDT_T4<WDT1> wdt;
@@ -98,7 +112,7 @@ FilterOnePole lowpassFilter(LOWPASS, filterFrequency);
 #define OUT1 6    // NEG Contactor
 #define OUT2 9    // PRE Charge Contactor
 #define OUT3 10   // Drive Contactor
-#define OUT4 11   // Brake Lights
+//#define OUT4 11   // Brake Lights
 #define OUT5 12   // Pump
 #define OUT6 24   // FAN
 #define OUT7 25   // No connection
@@ -106,18 +120,18 @@ FilterOnePole lowpassFilter(LOWPASS, filterFrequency);
 #define OUT9 29   // Temp Gauge
 #define OUT10 33  // RED LED
 #define OUT11 36  // Green LED
-#define OUT12 37  // Reverse Lights
+//#define OUT12 37  // Reverse Lights
 #define LEDpin 13 // Builtin LED
 
 // Define Inputs
 #define ISO_IN1 2  // FWD
 #define ISO_IN2 3  // START
-#define ISO_IN3 4  // Brake
+#define ISO_IN3 4  // BRAKE
 #define ISO_IN4 5  // REV
-#define ISO_IN5 26 // MAP 2 ECO
+#define ISO_IN5 26 // HEATER *
 #define ISO_IN6 27 // MAP 3 SPORT
 #define ISO_IN7 32 // IGNITION
-#define ISO_IN8 21 // PP Detect
+#define ISO_IN8 21 // PP DETECT
 
 #define POT_A 41 // POT A
 #define POT_B 40 // POT B
@@ -140,21 +154,28 @@ uint8_t VCUstatus = 1;
 // Setup Variables
 
 uint8_t brake_pedal; // Brake lights
-
+int flag=0; //*
+int flag1=0; //*
 uint8_t start;
 uint8_t ppDetect;    // Prox pilot pin
 uint8_t ignition;    // ignition
-uint8_t dir_FWD;     // Drive Switch is set to forward
-uint8_t dir_REV;     // dRIVE Sitch is to Reverse
-uint8_t dir_NEUTRAL; // Set Neutral as the default state
-uint8_t BMS_Status;  // BMS Status
+uint8_t dir_FWD = 1;     // Drive Switch is set to forward
+uint8_t dir_REV = 1;     // dRIVE Sitch is to Reverse
+uint8_t dir_NEUTRAL = 0; // Set Neutral as the default state
+uint8_t BMS_Status = 1;  // BMS Status
 uint8_t BMS_SOC;
 uint8_t inverterFunction = 0x00;
 uint8_t BMS_keyOn = 0;
 
+float BMS_avgvolt;
 float BMS_avgtmp; // BMS Battery AVG Temp
 float currentact; // BMS Current
 float BMS_packvoltage;
+float BMS_Volt[84];
+float BMS_nom;
+float BMS_max;
+float BMS_min;
+
 int BMS_discurrent;
 
 unsigned long pretimer1 = 0;
@@ -171,6 +192,7 @@ int chargerTemp2 = 0;
 int chargerTemp3 = 0;
 int chargerTemp4 = 0;
 int chargerHVcurrent = 0;
+int chargercurrent = 0;
 uint8_t chargerStatus;
 int avgChargerTemp = 0;
 
@@ -328,9 +350,9 @@ void setup()
   Can1.begin();
   Can2.begin();
   Can3.begin();
-  Can1.setBaudRate(500000);
+  Can1.setBaudRate(250000);
   Can2.setBaudRate(500000);
-  Can3.setBaudRate(50000);
+  Can3.setBaudRate(500000);
 
   Can1.setMaxMB(NUM_TX_MAILBOXES + NUM_RX_MAILBOXES);
   for (int i = 0; i < NUM_RX_MAILBOXES; i++)
@@ -350,7 +372,7 @@ void setup()
 
   for (int i = NUM_RX_MAILBOXES; i < (NUM_TX_MAILBOXES + NUM_RX_MAILBOXES); i++)
   {
-    Can1.setMB((FLEXCAN_MAILBOX)i, TX, STD);
+   // Can1.setMB((FLEXCAN_MAILBOX)i, TX, STD); // *
     Can2.setMB((FLEXCAN_MAILBOX)i, TX, STD);
     Can3.setMB((FLEXCAN_MAILBOX)i, TX, STD);
   }
@@ -361,24 +383,27 @@ void setup()
   Can2.enableMBInterrupts();
   Can3.setMBFilter(REJECT_ALL);
   Can3.enableMBInterrupts();
-  Can1.onReceive(MB0, canRX_377); // Charger LV Stats
-  Can1.onReceive(MB1, canRX_355); // BMS Status
-  Can1.onReceive(MB2, canRX_389); // Charger HV Stats
+  Can2.onReceive(MB0, canRX_377); // Charger LV Stats
+  Can2.onReceive(MB1, canRX_38A); // Charger LV Stats
+//  Can1.onReceive(MB1, canRX_355); // BMS Status 
+  Can2.onReceive(MB2, canRX_389); // Charger HV Stats
   Can2.onReceive(MB3, canRX_289); // Inverter RPM Battery and Torque
   Can2.onReceive(MB4, canRX_299); // Inverter Temps
   Can2.onReceive(MB5, canRX_732); // Inverter current
   Can2.onReceive(MB6, canRX_733); // Inverter Temps
-  Can1.onReceive(MB7, canRX_356); // BMS HV Voltage
-  Can1.onReceive(MB8, canRX_351); // BMS HV Voltage
-  Can1.setMBFilter(MB0, 0x377);
-  Can1.setMBFilter(MB1, 0x355);
-  Can1.setMBFilter(MB2, 0x389);
-  Can1.setMBFilter(MB7, 0x356);
-  Can1.setMBFilter(MB8, 0x351);
+//  Can1.onReceive(MB7, canRX_356); // BMS HV Voltage
+//  Can1.onReceive(MB8, canRX_351); // BMS HV Voltage
+//  Can1.setMBFilter(MB1, 0x355);  
+//  Can1.setMBFilter(MB7, 0x356);
+//  Can1.setMBFilter(MB8, 0x351);
+  Can2.setMBFilter(MB0, 0x377);
+  Can2.setMBFilter(MB0, 0x38A);
+  Can2.setMBFilter(MB2, 0x389);
   Can2.setMBFilter(MB3, 0x289);
   Can2.setMBFilter(MB4, 0x299);
   Can2.setMBFilter(MB5, 0x732);
   Can2.setMBFilter(MB6, 0x733);
+  Can1.setMBFilter(MB1, 0x01,0x02,0x03,0x04,0x05,0x06,0x07);
 
   Can1.mailboxStatus();
   Can2.mailboxStatus();
@@ -463,11 +488,11 @@ void loop()
   Can1.events(); // Call CAN bus bus interupts
   Can2.events();
   Can3.events(); // Currently this only send.
-
-  dashComms();
+  BMS_Stat();
+//  dashComms();
   tempCheck();
-  stateHandler();
-  readPins();
+  stateHandler(); 
+  readPins(); 
 
   if (pedalDebug == 1)
   {
@@ -871,8 +896,9 @@ void readPins()
   map2 = digitalRead(ISO_IN5);
   map3 = digitalRead(ISO_IN6);
   ignition = digitalRead(ISO_IN7);
-  ppDetect = digitalRead(ISO_IN8);
-}
+  ppDetect = !digitalRead(ISO_IN8);
+
+ }
 
 void readPedal()
 
@@ -960,6 +986,95 @@ void dogFood()
 
 // CAN Functions
 
+void BMS_Stat()
+{
+ if (timer1000_3.check() == 1)
+{
+  BMS_avgtmp = 0;
+BMS_packvoltage = 0.00;  
+memset(BMS_Volt, 0, sizeof(BMS_Volt)); 
+   Serial.println("BMS_Stat");
+   msg.id = 0x01;
+    msg.len = 1;
+    msg.buf[0] = 0xFF;
+    Can1.write(msg);
+    Can2.write(msg);
+    Can3.write(msg);
+    
+
+    delay(2); 
+    msg.id = 0x02;
+    msg.len = 1;
+    msg.buf[0] = 0xFF;
+    Can1.write(msg);
+
+    delay(2); 
+    msg.id = 0x03;
+    msg.len = 1;
+    msg.buf[0] = 0xFF;
+    Can1.write(msg);
+
+    delay(2); 
+    msg.id = 0x04;
+    msg.len = 1;
+    msg.buf[0] = 0xFF;
+    Can1.write(msg);
+    
+    delay(2); 
+    msg.id = 0x05;
+    msg.len = 1;
+    msg.buf[0] = 0xFF;
+    Can1.write(msg);
+
+    delay(2); 
+    msg.id = 0x06;
+    msg.len = 1;
+    msg.buf[0] = 0xFF;
+    Can1.write(msg);
+
+    delay(2); 
+    msg.id = 0x07;
+    msg.len = 1;
+    msg.buf[0] = 0xFF;
+    Can1.write(msg);
+
+delay(200); 
+ BMS_max = 0;
+  BMS_min = 5;
+  BMS_packvoltage = 0;
+ for(int i=0; i<sizeof(BMS_Volt)/sizeof(int);i++){
+ // Serial.print("Элемент ");
+ //   Serial.print(i);
+ //   Serial.print(": ");
+ //   Serial.println(BMS_Volt[i]);
+  BMS_max = max(BMS_Volt[i],BMS_max);
+ if (BMS_Volt[i] > 0)
+  {
+  BMS_min = min(BMS_Volt[i],BMS_min);
+BMS_packvoltage = BMS_packvoltage+BMS_Volt[i];
+ 
+    }
+
+}
+Serial.println(BMS_packvoltage);
+BMS_SOC = map(uint16_t(BMS_avgvolt*1000), 2550, 4150, 0,100); 
+BMS_discurrent = 225;
+if (BMS_discurrent > 0)
+    {
+      //Temperature based///
+
+      if (BMS_avgtmp > 30)
+      {
+        BMS_discurrent = BMS_discurrent - map(BMS_avgtmp, 30, 100, 0, 225);
+      }
+      //Voltagee based///
+      if (BMS_min < (3.5))
+      {
+        BMS_discurrent = BMS_discurrent - map(BMS_min, 3.2, 3.5, 225, 0);
+      }
+
+}
+
 void canRX_289(const CAN_message_t &msg)
 {
   motorTorque = ((((msg.buf[0] * 256) + msg.buf[1]) - 10000) / 10); // Motor Torque -200 / + 200nm
@@ -979,14 +1094,96 @@ void canRX_299(const CAN_message_t &msg)
 
 void canRX_351(const CAN_message_t &msg)
 {
-  BMS_discurrent = (((msg.buf[5] * 256) + msg.buf[4]) / 10);
+//  BMS_discurrent = (((msg.buf[5] * 256) + msg.buf[4]) / 10);
 }
 
-void canRX_355(const CAN_message_t &msg)
+void canRX_001(const CAN_message_t &msg)
 {
+
+if (msg.buf[0] == 1)
+  {
+   BMS_avgvolt=max(BMS_avgvolt,((msg.buf[5] / 1000.0) * 256) + (msg.buf[6] / 1000.0)); 
+     BMS_avgtmp = max(BMS_avgtmp,(msg.buf[2] + msg.buf[1]) + 8);
+  }
+
+  if (msg.buf[0] == 4)
+  {
+  if (msg.buf[1] < 19)
+
+  {
+    if (msg.id == 0x01)
+  {
+      //BMS_avgtmp4=0;
+    //BMS_packvoltage4 = 0;
+    BMS_Volt[msg.buf[1]] = (((msg.buf[2] / 1000.0) * 256) + (msg.buf[3] / 1000.0));
+    BMS_Volt[msg.buf[1] + 1] = (((msg.buf[4] / 1000.0) * 256) + (msg.buf[5] / 1000.0));
+    BMS_Volt[msg.buf[1] + 2] = (((msg.buf[6] / 1000.0) * 256) + (msg.buf[7] / 1000.0));
+  }
+  if (msg.id == 0x02)
+  {
+      //BMS_avgtmp4=0;
+    //BMS_packvoltage4 = 0;
+    BMS_Volt[msg.buf[1] + 13] = (((msg.buf[2] / 1000.0) * 256) + (msg.buf[3] / 1000.0));
+    BMS_Volt[msg.buf[1] + 14] = (((msg.buf[4] / 1000.0) * 256) + (msg.buf[5] / 1000.0));
+    BMS_Volt[msg.buf[1] + 15] = (((msg.buf[6] / 1000.0) * 256) + (msg.buf[7] / 1000.0));
+  }
+  if (msg.id == 0x03)
+  {
+      //BMS_avgtmp4=0;
+    //BMS_packvoltage4 = 0;
+    BMS_Volt[msg.buf[1] + 25] = (((msg.buf[2] / 1000.0) * 256) + (msg.buf[3] / 1000.0));
+    BMS_Volt[msg.buf[1] + 26] = (((msg.buf[4] / 1000.0) * 256) + (msg.buf[5] / 1000.0));
+    BMS_Volt[msg.buf[1] + 27] = (((msg.buf[6] / 1000.0) * 256) + (msg.buf[7] / 1000.0));
+  }
+  if (msg.id == 0x04)
+  {
+         //BMS_avgtmp4=0;
+    //BMS_packvoltage4 = 0;
+    BMS_Volt[msg.buf[1] + 37] = (((msg.buf[2] / 1000.0) * 256) + (msg.buf[3] / 1000.0));
+    BMS_Volt[msg.buf[1] + 38] = (((msg.buf[4] / 1000.0) * 256) + (msg.buf[5] / 1000.0));
+    BMS_Volt[msg.buf[1] + 39] = (((msg.buf[6] / 1000.0) * 256) + (msg.buf[7] / 1000.0));
+  }
+
+      if (msg.id == 0x05)
+  {
+         //BMS_avgtmp4=0;
+    //BMS_packvoltage4 = 0;
+    BMS_Volt[msg.buf[1] + 49] = (((msg.buf[2] / 1000.0) * 256) + (msg.buf[3] / 1000.0));
+    BMS_Volt[msg.buf[1] + 50] = (((msg.buf[4] / 1000.0) * 256) + (msg.buf[5] / 1000.0));
+    BMS_Volt[msg.buf[1] + 52] = (((msg.buf[6] / 1000.0) * 256) + (msg.buf[7] / 1000.0));
+  }
+
+   if (msg.id == 0x06)
+  {
+         //BMS_avgtmp4=0;
+    //BMS_packvoltage4 = 0;
+    BMS_Volt[msg.buf[1] + 61] = (((msg.buf[2] / 1000.0) * 256) + (msg.buf[3] / 1000.0));
+    BMS_Volt[msg.buf[1] + 62] = (((msg.buf[4] / 1000.0) * 256) + (msg.buf[5] / 1000.0));
+    BMS_Volt[msg.buf[1] + 63] = (((msg.buf[6] / 1000.0) * 256) + (msg.buf[7] / 1000.0));
+  }   
+
+  if (msg.id == 0x07)
+  {
+         //BMS_avgtmp4=0;
+    //BMS_packvoltage4 = 0;
+    BMS_Volt[msg.buf[1] + 73] = (((msg.buf[2] / 1000.0) * 256) + (msg.buf[3] / 1000.0));
+    BMS_Volt[msg.buf[1] + 74] = (((msg.buf[4] / 1000.0) * 256) + (msg.buf[5] / 1000.0));
+    BMS_Volt[msg.buf[1] + 75] = (((msg.buf[6] / 1000.0) * 256) + (msg.buf[7] / 1000.0));
+  }
+    
+  }
+   }
+
+ // Serial.println(msg.id);
+if (msg.buf[0] == 0x01)
+  {
+   // BMS_avgtmp1=0;
+   // BMS_packvoltage1 = 0;
+     }
+
   BMS_SOC = ((msg.buf[1] * 256) + msg.buf[0]);
-  BMS_avgtmp = (((msg.buf[5] / 10.0) * 256) + (msg.buf[4] / 10.0));
-  BMS_Status = msg.buf[6];
+  //BMS_avgtmp = (((msg.buf[5] / 10.0) * 256) + (msg.buf[4] / 10.0));
+  //BMS_Status = 3;
 
   if (BMS_Status == 5)
   {
@@ -1004,7 +1201,7 @@ void canRX_355(const CAN_message_t &msg)
 void canRX_356(const CAN_message_t &msg)
 {
 
-  BMS_packvoltage = (((msg.buf[1] * 256) / 100.0) + (msg.buf[0] / 100.0));
+//  BMS_packvoltage = (((msg.buf[1] * 256) / 100.0) + (msg.buf[0] / 100.0));
 
   int amps = (msg.buf[3] * 256) + (msg.buf[2]);
   currentact = ((amps - 3000) / 10.0);
@@ -1029,6 +1226,22 @@ void canRX_389(const CAN_message_t &msg)
   chargerTemp4 = msg.buf[4] - 40;
 }
 
+void canRX_38A(const CAN_message_t &msg)
+{
+ // chargerHVbattryVolts = msg.buf[0] * 2; // Charger HV Battery Voltage
+  chargercurrent = msg.buf[3];
+  if (chargercurrent>0) 
+  {
+BMS_Status = 3;
+//EvseStart();
+  }
+else
+{
+  VCUstatus = ready;
+BMS_Status = 1;
+}  
+}
+
 void canRX_732(const CAN_message_t &msg)
 {
   // inverter Current
@@ -1042,6 +1255,45 @@ void canRX_733(const CAN_message_t &msg)
   motorTemp1 = (msg.buf[0] - 40);
   motorTemp2 = (msg.buf[2] - 40);
   avgMotorTemp = (motorTemp1 + motorTemp2 + motorTempPeak) / 3;
+}
+
+void EvseStart()
+{
+  if (timer1000_1.check() == 1)
+  {
+  msg.id = 0x285;
+    msg.len = 8;
+    msg.buf[0] = 0;
+    msg.buf[1] = 0;
+     if (BMS_Status == 3)
+      {
+    msg.buf[2] = 0xB6;
+      }
+    else
+    {
+     msg.buf[2] = 0;  
+    }
+    msg.buf[3] = 0;
+    msg.buf[4] = 0;
+    msg.buf[5] = 0;
+    msg.buf[6] = 0;
+    msg.buf[7] = 0;
+    Can2.write(msg);
+
+
+    msg.id = 0x286;
+      msg.len = 8;
+      msg.buf[0] = highByte(uint16_t(3500)); //voltage
+      msg.buf[1] = lowByte(uint16_t(3500));
+      msg.buf[2] = lowByte(map(chargercurrent,13,27,6,12)*10);
+      msg.buf[3] = 0x0;
+      msg.buf[4] = 0x0;
+      msg.buf[5] = 0x0;
+      msg.buf[6] = 0x0;
+      msg.buf[7] = 0x0;
+    Can2.write(msg);
+ //  Serial.println(map(chargercurrent,13,27,6,12)*10); 
+}
 }
 
 void inverterComms()
@@ -1196,6 +1448,46 @@ void inverterComms()
     msg.buf[7] = 0;
     Can2.write(msg);
   }
+}
+
+void BMS_Read()
+{
+  if (timer10_1.check() == 1)
+  {
+ BMS_max = 0;
+  BMS_min = 5;
+  BMS_packvoltage = 0;
+ for(int i=0; i<sizeof(BMS_Volt)/sizeof(int);i++){
+ // Serial.print("Элемент ");
+ //   Serial.print(i);
+ //   Serial.print(": ");
+ //   Serial.println(BMS_Volt[i]);
+  BMS_max = max(BMS_Volt[i],BMS_max);
+ if (BMS_Volt[i] > 0)
+  {
+  BMS_min = min(BMS_Volt[i],BMS_min);
+BMS_packvoltage = BMS_packvoltage+BMS_Volt[i];
+ 
+    }
+}
+Serial.println(BMS_packvoltage);
+BMS_SOC = map(uint16_t(BMS_avgvolt*1000), 2550, 4150, 0,100); 
+BMS_discurrent = 225;
+if (BMS_discurrent > 0)
+    {
+      //Temperature based///
+
+      if (BMS_avgtmp > 30)
+      {
+        BMS_discurrent = BMS_discurrent - map(BMS_avgtmp, 30, 100, 0, 225);
+      }
+      //Voltagee based///
+      if (BMS_min < (3.5))
+      {
+        BMS_discurrent = BMS_discurrent - map(BMS_min, 3.2, 3.5, 225, 0);
+      }
+}
+}
 }
 
 void dashComms()
@@ -1481,7 +1773,8 @@ void stateHandler()
     }
     break;
   }
-  case driveNeutral:
+*************************************************************KONCAL**********************************************************************
+    case driveNeutral:
   {
     if (digitalRead(OUT12) == HIGH)
     {
