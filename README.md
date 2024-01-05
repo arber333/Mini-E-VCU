@@ -16,8 +16,10 @@ Added filtering to pedal input
 Bug fixes and general clean ups.
 
 Update - 31.12.23
+
 Adding JK BMS code 
 
 Update - 05.1.24
+
 Additional code to revert from each of defined VCU states back to "ready" state when "PP" or "ignition" signal goes off.
 
