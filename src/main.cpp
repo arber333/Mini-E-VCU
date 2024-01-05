@@ -28,23 +28,32 @@
 #include <ADC_util.h>
 #include <EEPROM.h>
 #include <Filters.h>
+#include <Teensy_PWM.h>
 // CAN Setup
 
 FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> Can1;
 FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> Can2;
 FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_16> Can3;
 
-#define NUM_TX_MAILBOXES 10
-#define NUM_RX_MAILBOXES 10
+#define NUM_TX_MAILBOXES 15
+#define NUM_RX_MAILBOXES 15
 
 CAN_message_t msg;
+
+/* bms status values
+Boot 0
+Ready 1
+Drive 2
+Charge 3
+Precharge 4
+Error 5
+*/
 
 signed long loopTime = 0;
 
 void canRX_289(const CAN_message_t &msg); // Inverter RPM, Battery and Torque
 void canRX_299(const CAN_message_t &msg); // Inverter Temps
 void canRX_351(const CAN_message_t &msg); // BMS Status
-// void canRX_355(const CAN_message_t &msg); // BMS Status
 void canRX_001(const CAN_message_t &msg); // BMS Status *
 void canRX_002(const CAN_message_t &msg); // BMS Status *
 void canRX_003(const CAN_message_t &msg); // BMS Status *
@@ -54,6 +63,7 @@ void canRX_006(const CAN_message_t &msg); // BMS Status *
 void canRX_007(const CAN_message_t &msg); // BMS Status *
 void canRX_356(const CAN_message_t &msg); // BMS HV Voltage
 void canRX_377(const CAN_message_t &msg); // Outlander Charger Low voltage stats
+void canRX_38A(const CAN_message_t &msg); // Outlander Charger EVSE
 void canRX_389(const CAN_message_t &msg); // Outlander Charger HV stats
 void canRX_732(const CAN_message_t &msg); // Inverter Current
 void canRX_733(const CAN_message_t &msg); // Inverter Temps
@@ -69,6 +79,7 @@ void readPedal();
 void inverterComms();
 void EvseStart(); //*
 void tempCheck();
+void Speedo();
 void showInfo();
 void loadDefault();
 void saveVarsToEEPROM();
@@ -112,15 +123,15 @@ FilterOnePole lowpassFilter(LOWPASS, filterFrequency);
 #define OUT1 6    // NEG Contactor
 #define OUT2 9    // PRE Charge Contactor
 #define OUT3 10   // Drive Contactor
-//#define OUT4 11   // Brake Lights
+#define OUT4 11   // Brake Lights
 #define OUT5 12   // Pump
 #define OUT6 24   // FAN
-#define OUT7 25   // No connection
+#define OUT7 25   // RPM signal
 #define OUT8 28   // DC -DC Enable
-#define OUT9 29   // Temp Gauge
+#define OUT9 29   // Temp Gauge signal
 #define OUT10 33  // RED LED
 #define OUT11 36  // Green LED
-//#define OUT12 37  // Reverse Lights
+#define OUT12 37  // Reverse Lights
 #define LEDpin 13 // Builtin LED
 
 // Define Inputs
@@ -134,7 +145,7 @@ FilterOnePole lowpassFilter(LOWPASS, filterFrequency);
 #define ISO_IN8 21 // PP DETECT
 
 #define POT_A 41 // POT A
-#define POT_B 40 // POT B
+#define POT_B 39 // POT B
 
 // VCU Staus
 
@@ -156,6 +167,7 @@ uint8_t VCUstatus = 1;
 uint8_t brake_pedal; // Brake lights
 int flag=0; //*
 int flag1=0; //*
+
 uint8_t start;
 uint8_t ppDetect;    // Prox pilot pin
 uint8_t ignition;    // ignition
@@ -372,7 +384,7 @@ void setup()
 
   for (int i = NUM_RX_MAILBOXES; i < (NUM_TX_MAILBOXES + NUM_RX_MAILBOXES); i++)
   {
-   // Can1.setMB((FLEXCAN_MAILBOX)i, TX, STD); // *
+    Can1.setMB((FLEXCAN_MAILBOX)i, TX, STD); // *
     Can2.setMB((FLEXCAN_MAILBOX)i, TX, STD);
     Can3.setMB((FLEXCAN_MAILBOX)i, TX, STD);
   }
@@ -385,17 +397,12 @@ void setup()
   Can3.enableMBInterrupts();
   Can2.onReceive(MB0, canRX_377); // Charger LV Stats
   Can2.onReceive(MB1, canRX_38A); // Charger LV Stats
-//  Can1.onReceive(MB1, canRX_355); // BMS Status 
   Can2.onReceive(MB2, canRX_389); // Charger HV Stats
   Can2.onReceive(MB3, canRX_289); // Inverter RPM Battery and Torque
   Can2.onReceive(MB4, canRX_299); // Inverter Temps
   Can2.onReceive(MB5, canRX_732); // Inverter current
   Can2.onReceive(MB6, canRX_733); // Inverter Temps
-//  Can1.onReceive(MB7, canRX_356); // BMS HV Voltage
-//  Can1.onReceive(MB8, canRX_351); // BMS HV Voltage
-//  Can1.setMBFilter(MB1, 0x355);  
-//  Can1.setMBFilter(MB7, 0x356);
-//  Can1.setMBFilter(MB8, 0x351);
+
   Can2.setMBFilter(MB0, 0x377);
   Can2.setMBFilter(MB0, 0x38A);
   Can2.setMBFilter(MB2, 0x389);
@@ -403,7 +410,7 @@ void setup()
   Can2.setMBFilter(MB4, 0x299);
   Can2.setMBFilter(MB5, 0x732);
   Can2.setMBFilter(MB6, 0x733);
-  Can1.setMBFilter(MB1, 0x01,0x02,0x03,0x04,0x05,0x06,0x07);
+  Can1.setMBFilterRange(MB1, 0x01,0x07);
 
   Can1.mailboxStatus();
   Can2.mailboxStatus();
@@ -513,6 +520,9 @@ void loop()
       menu();
     }
   }
+
+Speedo(); // speedo 
+
 
   if (timer30s_1.check()==1)  //Check the DC-DC so we only enable when needed.
   {
@@ -1042,11 +1052,8 @@ delay(200);
  BMS_max = 0;
   BMS_min = 5;
   BMS_packvoltage = 0;
- for(int i=0; i<sizeof(BMS_Volt)/sizeof(int);i++){
- // Serial.print("Элемент ");
- //   Serial.print(i);
- //   Serial.print(": ");
- //   Serial.println(BMS_Volt[i]);
+ for(int i=0; i<sizeof(BMS_Volt)/sizeof(int);i++) {
+
   BMS_max = max(BMS_Volt[i],BMS_max);
  if (BMS_Volt[i] > 0)
   {
@@ -1074,6 +1081,8 @@ if (BMS_discurrent > 0)
       }
 
 }
+}
+}
 
 void canRX_289(const CAN_message_t &msg)
 {
@@ -1092,10 +1101,10 @@ void canRX_299(const CAN_message_t &msg)
   avgInverterTemp = (inverterTemp1 + inverterTemp2) / 2;
 }
 
-void canRX_351(const CAN_message_t &msg)
+/* void canRX_351(const CAN_message_t &msg)
 {
 //  BMS_discurrent = (((msg.buf[5] * 256) + msg.buf[4]) / 10);
-}
+} */
 
 void canRX_001(const CAN_message_t &msg)
 {
@@ -1198,14 +1207,14 @@ if (msg.buf[0] == 0x01)
   }
 }
 
-void canRX_356(const CAN_message_t &msg)
+/* void canRX_356(const CAN_message_t &msg)
 {
 
 //  BMS_packvoltage = (((msg.buf[1] * 256) / 100.0) + (msg.buf[0] / 100.0));
 
   int amps = (msg.buf[3] * 256) + (msg.buf[2]);
   currentact = ((amps - 3000) / 10.0);
-}
+} */
 
 void canRX_377(const CAN_message_t &msg)
 {
@@ -1615,6 +1624,15 @@ void tempCheck()
   }
 }
 
+void Speedo()
+{
+  if (timer100_3.check() == 1)
+  {
+  tone(OUT7, 25); 
+
+  }
+}
+
 void showInfo()
 {
   Serial.println();
@@ -1747,11 +1765,29 @@ void stateHandler()
   }
   case ready:
   {
-    if (BMS_Status == 3)
+	  
+    if ((BMS_Status == 1) && (digitalRead(OUT3) == HIGH))
+    {
+        digitalWrite(OUT1, LOW); // Neg Cnct Off
+        digitalWrite(OUT2, LOW); // Pre Cnct Off
+        digitalWrite(OUT3, LOW); // Drive cnct Off
+        digitalWrite(OUT4, LOW); // Brake lights off
+        digitalWrite(OUT5, LOW); // Pump off
+        digitalWrite(OUT6, LOW); // Fan off
+        digitalWrite(OUT7, LOW); // RPM indicator off
+		digitalWrite(OUT8, LOW); // DC-DC Enable Off
+		digitalWrite(OUT9, LOW); // Temp Off
+	    digitalWrite(OUT10, LOW); // Red dash LED Off	
+		digitalWrite(OUT11, LOW); // Green dash LED on
+		digitalWrite(OUT12, LOW); // reversing lights off	
+    }
+	  	  
+    if ((digitalRead(ISO_IN8) == HIGH))
     {
       if (VCUstatusChangeCounter > VCUstatusChangeThreshold)
       {
         VCUstatusChangeCounter = 0;
+        BMS_Status = 3;
         VCUstatus = charging;
         Serial.print("VCU Status: ");
         Serial.println(VCUstatus);
@@ -1762,10 +1798,13 @@ void stateHandler()
       }
     }
 
+
+
     if ((start == 0) && (brake_pedal == 0) && (BMS_Status == 1))
     {
       if ((dir_FWD == 1) && (dir_REV == 1))
       {
+        BMS_Status = 2;
         VCUstatus = driveNeutral;
         Serial.print("VCU Status: ");
         Serial.println(VCUstatus);
@@ -1884,6 +1923,27 @@ void stateHandler()
         }
       }
     }
+
+
+
+    if (BMS_Status != 2) {
+BMS_Status = 2;
+    }
+
+      // Check for ISO_IN7 ignition inactivity
+   if ((digitalRead(ISO_IN1) == HIGH) && (digitalRead(ISO_IN4) == HIGH) && (digitalRead(ISO_IN7) == HIGH))
+      {
+     if (VCUstatusChangeCounter > VCUstatusChangeThreshold)
+      {
+        VCUstatusChangeCounter = 0;
+        BMS_Status = 1;
+        VCUstatus = ready;
+      }
+      else
+      {
+        VCUstatusChangeCounter++;
+      }
+      }
 
     break;
   }
@@ -2023,6 +2083,27 @@ void stateHandler()
       digitalWrite(OUT4, LOW); // Brake Lights off
     }
     inverterComms();
+		  
+        if (BMS_Status != 2) {
+
+BMS_Status = 2;
+
+    }
+
+      // Check for ISO_IN7 ignition inactivity
+   if ((digitalRead(ISO_IN1) == LOW) && (digitalRead(ISO_IN7) == HIGH))
+      {
+     if (VCUstatusChangeCounter > VCUstatusChangeThreshold)
+      {
+        VCUstatusChangeCounter = 0;
+        BMS_Status = 1;
+        VCUstatus = ready;
+      }
+      else
+      {
+        VCUstatusChangeCounter++;
+      }
+      }
 
     break;
   }
@@ -2078,6 +2159,27 @@ void stateHandler()
       torqueRequest = 0; // 0 Torque if the brake is presed
     }
     inverterComms();
+
+
+
+    if (BMS_Status != 2) {
+BMS_Status = 2;
+    }
+
+      // Check for ISO_IN7 ignition inactivity
+    if ((digitalRead(ISO_IN4) == LOW) && (digitalRead(ISO_IN7) == HIGH))
+      {
+     if (VCUstatusChangeCounter > VCUstatusChangeThreshold)
+      {
+        VCUstatusChangeCounter = 0;
+        BMS_Status = 1;
+        VCUstatus = ready;
+      }
+      else
+      {
+        VCUstatusChangeCounter++;
+      }
+          }
 
     break;
   }
@@ -2178,6 +2280,22 @@ void stateHandler()
         }
       }
     }
+	
+	      // Check for ISO_IN8 PP inactivity
+      if (digitalRead(ISO_IN8) == LOW) 
+      {
+     if (VCUstatusChangeCounter > VCUstatusChangeThreshold)
+      {
+        VCUstatusChangeCounter = 0;
+        BMS_Status = 1;
+        VCUstatus = ready;
+      }
+      else
+      {
+        VCUstatusChangeCounter++;
+      }
+      }
+	
     break;
   }
 
@@ -2185,6 +2303,7 @@ void stateHandler()
   {
     BMS_keyOn = 0;
     inverterFunction = 0x00;
+    digitalWrite(OUT10, HIGH); // Red LED on    
     Serial.println("ERROR !!!");
 
     break;
