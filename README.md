@@ -30,5 +30,5 @@ Additional code to revert from each of defined VCU states back to "ready" state 
 - Remapped Charger control
 - Corrected Metro timer function assignments so that only one timer is assigned to single function.
 - Identified out two lines that govern direction of torque in code that work as i wanted. Providing negative attribute will reverse direction.
-"targetTorque = (throttlePosition * pedal_offset) * 2;"
-"torqueRequest = throttlePosition * -6;"
+  "targetTorque = (throttlePosition * pedal_offset) * 2;"
+  "torqueRequest = throttlePosition * -6;"
