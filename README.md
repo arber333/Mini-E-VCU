@@ -23,3 +23,12 @@ Update - 05.1.24
 
 Additional code to revert from each of defined VCU states back to "ready" state when "PP" or "ignition" signal goes off.
 
+14.1.24
+- Separated 0x285 telegram from all other functions. I use Intervaltimer command. 0x285 is a heartbeat from BMS and we only need one instance for all hardware to work. To do this i went and added a timer countdown at 10ms so 0x285 goes out regardless of other functions.
+- Made function for heater control.
+- Repaired error in CAN mailbox declarations, now CAN reading works good
+- Remapped Charger control
+- Corrected Metro timer function assignments so that only one timer is assigned to single function.
+- Identified out two lines that govern direction of torque in code that work as i wanted. Providing negative attribute will reverse direction.
+"targetTorque = (throttlePosition * pedal_offset) * 2;"
+"torqueRequest = throttlePosition * -6;"
