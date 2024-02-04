@@ -97,6 +97,7 @@ Metro timer50_2 = Metro(50);     // De-bounce check
 Metro timer100_1 = Metro(100);   // 2nd inverter timer
 Metro timer100_2 = Metro(96);    // longer Debounce
 Metro timer100_3 = Metro(110);   // Temp handler
+Metro timer100_4 = Metro(100);   // Speedo handler
 Metro timer500_1 = Metro(50);    // pedal debug timer
 Metro timer500_2 = Metro(500);    // Charger timer
 Metro timer5_1 = Metro(5);    // BMS_Stat *
@@ -212,11 +213,11 @@ int Heatertemp2 = 0;
 int chargerTemp1 = 0;
 int chargerTemp2 = 0;
 int chargerTemp3 = 0;
-int chargerTemp4 = 0;
+int chargerTempCH = 0;
 int chargerHVcurrent = 0;
 int chargercurrent = 0;
 uint8_t chargerStatus;
-int avgChargerTemp = 0;
+int DCDCTemp = 0;
 bool chargerHV1 = false; //charger voltage threshold 1
 bool chargerHV2 = false;  //charger voltage threshold 2
 
@@ -257,20 +258,19 @@ uint8_t pumpState = 0;
 uint8_t fanState = 0;
 // EEPROM Stored Vars
 
-uint8_t tempGaugeMin = EEPROM.read(1); // Temp Gauge min PWM
+uint8_t tempGaugeMin = EEPROM.read(1); // Temp Gauge min PWM  
 uint8_t tempGaugeMax = EEPROM.read(2); // Temp Gauge Max PWM
 
 uint8_t pumpOnTemp = EEPROM.read(3);
-uint8_t pumpoffTemp = EEPROM.read(4);
-
-uint8_t fanOffTemp = EEPROM.read(5);
 uint8_t fanOnTemp = EEPROM.read(6);
 
+uint16_t chargerstop = EEPROM.read(9); // Maximal charger voltage
 int maxTorque = EEPROM.read(31) * 255 + EEPROM.read(30);     // not used currently
 int minTorque = EEPROM.read(8);                              // Used for creeping feature to be added
 int tpslowOffset = EEPROM.read(21) * 255 + EEPROM.read(20);  // Value when foot off pedal
 int tpshighOffset = EEPROM.read(23) * 255 + EEPROM.read(22); // Value when foot on pedal
 int torqueIncrement = EEPROM.read(11);                       // used for ramping up torque request
+uint8_t Regen = EEPROM.read(12); 
 uint8_t setTpsLow = 0;
 uint8_t setTpsHigh = 0;
 
@@ -278,14 +278,12 @@ uint8_t active_map = 1; // Active Pedal map
 uint8_t map3;           // Sport MAp
 
 // Define constants
-const float tireDiameterInInches = 15.0; // Tire diameter in inches
-const float aspectRatio = 55.0; // Aspect ratio of the tire
-const float wheelRadius = (tireDiameterInInches * 0.0254 / 2) * (100 - aspectRatio) / 100.0; // Convert inches to meters
-
-const float finalDriveRatio = 7.065; // Final drive ratio
-const float rpmToSpeedMultiplier = (2.0 * 3.14 * wheelRadius * finalDriveRatio) / (60.0 * 1000.0 * 100.0); // Conversion factor
-
+// speed = wheelsRPM * tireD * PI * 60 / 1000 Km/h
+const float tireD = 0.596; //15in wheels
+const float ratio = 7.065;
 float calcspeed = 0;
+float calcHz = 0;
+float calcHzi = 0;
 
 // Setup the peddal map arrays..
 
@@ -489,7 +487,7 @@ void setup()
   digitalWrite(OUT6, LOW);
   digitalWrite(OUT7, LOW);
   digitalWrite(OUT8, LOW);
-  analogWrite(OUT9, LOW);
+  digitalWrite(OUT9, LOW);
   digitalWrite(OUT10, HIGH);
   digitalWrite(OUT11, LOW);
   digitalWrite(OUT12, LOW);
@@ -547,7 +545,7 @@ void loop()
   }
 
 
-// Speedo(); // speedo 
+ // Speedo(); // speedo 
 
  if (Heater_pin == 0)  {
   digitalWrite(OUT5, HIGH);
@@ -592,15 +590,16 @@ void menu()
     Serial.println("----------------Mini E VCU Settings Menu----------------");
     Serial.println();
     Serial.println("1 - Set Pump on Temp");
-    Serial.println("2 - Set Pump off Temp");
+    Serial.println("2 - Set Fan on Temp");
     Serial.println("3 - Temp Gauge PWM Test");
     Serial.println("4 - Set Temp Gauge Low Value");
     Serial.println("5 - Set Temp Gauge High Value");
     Serial.println("6 - Set Pedal Lo Offset");
     Serial.println("7 - Set Pedal High Offset");
-    Serial.println("8 - Set Max Tourqe");
+    Serial.println("8 - Set Regen Tourqe");
     Serial.println("9 - Set Map");
     Serial.println("0 - Set Torque Increment");
+    Serial.println("U - Charger Stop Voltage");
     Serial.println("F - Fan On / Off");
     Serial.println("M - Pump on / Off");
     Serial.println("P - Show Pedal debug info");
@@ -633,14 +632,14 @@ void menu()
     break;
   }
   case '2':
-  {
+ {
     int value = Serial.parseInt();
     if (value > 100)
     {
       value = 100;
     }
-    pumpoffTemp = value;
-    Serial.print("Pump off Set to: ");
+    fanOnTemp = value;
+    Serial.print("Fan on Set to: ");
     Serial.println(value);
     menuLoad = 0;
 
@@ -654,13 +653,13 @@ void menu()
     {
       value = 255;
     }
-    analogWrite(OUT9, value);
+    //analogWrite(OUT9, value);
     Serial.print("Gauge Set to: ");
     Serial.println(value);
     menuLoad = 0;
 
     break;
-  }
+  } 
 
   case '4':
   {
@@ -695,7 +694,7 @@ void menu()
     Serial.print("Gauge Max Set to: ");
     Serial.println(value);
     menuLoad = 0;
-  }
+  } 
 
   break;
 
@@ -722,16 +721,16 @@ void menu()
   case '8':
   {
     int value = Serial.parseInt();
-    if (value > 2000)
+    if (value > 1000)
     {
-      value = 2000;
+      value = 1000;
     }
     if (value < 0)
     {
       value = 0;
     }
-    maxTorque = value;
-    Serial.print("Max Toruqe: ");
+    Regen = value;
+    Serial.print("Regen Toruqe: ");
     Serial.println(value);
     menuLoad = 0;
 
@@ -771,6 +770,21 @@ void menu()
     Serial.print("Torque Increment Set to: ");
     Serial.println(value);
     menuLoad = 0;
+  }
+
+ case 'u':
+  {
+    int value = Serial.parseInt();
+    if (value > 420)
+    {
+      value = 420;
+    }
+    chargerstop = value;
+    Serial.print("Charger Stop Voltage Set to: ");
+    Serial.println(value);
+    menuLoad = 0;
+
+    break;
   }
 
   case 'f':
@@ -1122,6 +1136,7 @@ void canRX_289(const CAN_message_t &msg)
 {
   motorTorque = ((((msg.buf[0] * 256) + msg.buf[1]) - 10000) / 10); // Motor Torque -200 / + 200nm
   motorRPM = (msg.buf[2] * 256 + msg.buf[3] - 20000);               // 289_RrRPM,Rear RPM,220289,C*256+D-20000,-10000,10000,RPM,
+  motorRPM = motorRPM * -1;  //Changing direction of RPM reading
   motorHVbatteryVolts = (msg.buf[4] * 256 + msg.buf[5]);            // Inverter HV
 }
 
@@ -1258,7 +1273,7 @@ void canRX_377(const CAN_message_t &msg)
   chargerTemp2 = msg.buf[5] - 40;
   chargerTemp3 = msg.buf[6] - 40;
   chargerStatus = msg.buf[7];
-  avgChargerTemp = (chargerTemp1 + chargerTemp2 + chargerTemp3 + chargerTemp4) / 4;
+  DCDCTemp = (chargerTemp1 + chargerTemp2 + chargerTemp3) / 3;
 }
 
 void canRX_389(const CAN_message_t &msg)
@@ -1266,7 +1281,7 @@ void canRX_389(const CAN_message_t &msg)
   chargerHVbattryVolts = msg.buf[0] * 2; // Charger HV Battery Voltage
   chargerACvolts = msg.buf[1];
   chargerHVcurrent = msg.buf[2] * 0.1;
-  chargerTemp4 = msg.buf[4] - 40;
+  chargerTempCH = msg.buf[4] - 40;
 }
 
 void canRX_398(const CAN_message_t &msg) // Heater stats
@@ -1307,10 +1322,10 @@ void EvseStart()
       msg.len = 8;
       msg.buf[0] = 0x10; //voltage 360V
       msg.buf[1] = 0x0E;
-      if ((chargerHVbattryVolts > 372) && (chargerHVbattryVolts <= 374)) { // if charger is at 370V
+      if ((chargerHVbattryVolts > (chargerstop - 2)) && (chargerHVbattryVolts <= (chargerstop))) { // if charger is at 370V
       msg.buf[2] = 0x1E;        
       }
-      else if (chargerHVbattryVolts > 374)  { // if charger is at 388V
+      else if (chargerHVbattryVolts > chargerstop)  { // if charger is at 388V
       msg.buf[2] = 0x00;        
       }
       else  { //any other case
@@ -1364,7 +1379,7 @@ void inverterComms()
     {
       if (regenTarget < regenRequest) // increment Regen
       {
-        regenRequest -= 5;
+        regenRequest -= Regen;
         torqueRequest = regenRequest;
         // Serial.println("Regen inc.");
       }
@@ -1378,7 +1393,7 @@ void inverterComms()
     {
       if (regenTarget > regenRequest) // increment Regen off
       {
-        regenRequest += 30;
+        regenRequest += Regen;
         torqueRequest = regenRequest;
         // Serial.println("Regen Dec.");
       }
@@ -1389,7 +1404,7 @@ void inverterComms()
       torqueRequest = 0;
       Serial.println("--!OVER TOURQUE!--");
     }
-    if (torqueRequest < (-1000))
+    if (torqueRequest < (-2000))
     {
       torqueRequest = 0;
       Serial.println("--!UNDER TOURQUE!--");
@@ -1398,7 +1413,7 @@ void inverterComms()
     torqueRequest = torqueRequest;
     torqueRequest += 10000;
 
-    if (BMS_discurrent < currentact) // Decrese tourque if we are over current - Crude needs work..
+   /* if (BMS_discurrent < currentact) // Decrese tourque if we are over current - Crude needs work..
     {
       torqueRequest -= 20;
       Serial.println("--!OVER CURRENT!--");
@@ -1406,7 +1421,7 @@ void inverterComms()
       {
         torqueRequest = 0;
       }
-    }
+    } */
 
     if (pedalDebug == 1)
     {
@@ -1524,7 +1539,7 @@ void dashComms()
     msg.buf[3] = BMS_Status;
     msg.buf[4] = BMS_SOC;
     msg.buf[5] = chargerHVbattryVolts / 2;
-    msg.buf[6] = avgChargerTemp;
+    msg.buf[6] = DCDCTemp;
     msg.buf[7] = avgMotorTemp;
     Can3.write(msg);
 
@@ -1548,7 +1563,7 @@ void dashComms()
     ;
     msg.buf[2] = 0;
     ;
-    msg.buf[3] = 0;
+    msg.buf[3] = 0;  
     msg.buf[4] = 0;
     msg.buf[5] = 0;
     msg.buf[6] = 0;
@@ -1630,9 +1645,7 @@ void tempCheck()
         pumpState = 1;
       }
     }
-    if (VCUstatus != 6)
-    {
-      if (Heatertemp < pumpoffTemp)
+     else if (Heatertemp < (pumpOnTemp - 5))
       {
         if (pumpState == 1)
         {
@@ -1640,22 +1653,8 @@ void tempCheck()
           pumpState = 0;
         }
       }
-    }
 
-    if (VCUstatus == 6)
-    {
-      if (Heatertemp > pumpoffTemp)
-      {
-
-        if (pumpState == 1)
-        {
-          digitalWrite(OUT5, LOW);
-          pumpState = 0;
-        }
-      }
-    }
-
-    if ((avgChargerTemp || avgInverterTemp || avgMotorTemp) > fanOnTemp)
+    if ((DCDCTemp || chargerTempCH || avgInverterTemp || avgMotorTemp) > fanOnTemp)
     {
       if (fanState == 0)
       {
@@ -1663,7 +1662,7 @@ void tempCheck()
         fanState = 1;
       }
     }
-    if ((avgChargerTemp && avgInverterTemp && avgMotorTemp) < fanOffTemp)
+    else if ((DCDCTemp && chargerTempCH && avgInverterTemp && avgMotorTemp) < (fanOnTemp - 5))
     {
       if (fanState == 1)
       {
@@ -1673,20 +1672,27 @@ void tempCheck()
     }
 
     // Send To Temp Gaauge
-    uint8_t tempGauge = (avgChargerTemp + avgMotorTemp + avgInverterTemp) / 3;
+    uint8_t tempGauge = (DCDCTemp + avgMotorTemp + avgInverterTemp) / 3;
     tempGauge = map(tempGauge, 0, 100, tempGaugeMin, tempGaugeMax);
-    analogWrite(OUT9, tempGauge);
+    //analogWrite(OUT9, tempGauge);
   }
 }
 
 void Speedo()
 {
-  if (timer100_3.check() == 1)
-  {
-calcspeed = motorRPM * rpmToSpeedMultiplier;
-  tone(OUT7, calcspeed); 
-
-  }
+if (timer100_4.check() == 1)
+  {  
+calcspeed = (motorRPM / ratio) * tireD * 3.14 * 60 / 1000; // speed = wheelsRPM * tireD * PI * 60 / 1000 Km/h
+calcHz = calcspeed * 1.4;
+if (calcHz >= 0) {
+calcHzi = calcHz;
+}
+else {
+calcHzi = calcHz * (-1);
+}
+tone(OUT7, calcHzi);
+//analogWriteFrequency(OUT7, calcHzi);
+}
 }
 
 void showInfo()
@@ -1700,7 +1706,7 @@ void showInfo()
   Serial.print(active_map);
   Serial.print("  BMS Status: ");
   Serial.print(BMS_Status);
-  Serial.print("  Charger Status: ");
+  Serial.print(" Charger Status: ");
   Serial.print(chargerStatus, HEX);
   Serial.print(" BMS Current: ");
   Serial.print(currentact);
@@ -1728,16 +1734,16 @@ void showInfo()
   Serial.print(Heatertemp);
   Serial.print("  Heater Status: ");
   Serial.print(Heater_pin);
-  Serial.print("  Charger Temp3: ");
-  Serial.print(chargerTemp3);
-  Serial.print("  Charger Temp4: ");
-  Serial.print(chargerTemp4);
-  Serial.print("  Avg Charger Temp: ");
-  Serial.println(avgChargerTemp);
-  Serial.print("Inverter Temp 1: ");
-  Serial.print(inverterTemp1);
-  Serial.print(" Inverter Temp 2: ");
-  Serial.print(inverterTemp2);
+  Serial.print("  Charger Stop Voltage: ");
+  Serial.print(chargerstop);
+  Serial.print("  Charger Temp: ");
+  Serial.print(chargerTempCH);
+  Serial.print("  DCDC Temp: ");
+  Serial.println(DCDCTemp);
+  // Serial.print("Inverter Temp 1: ");
+  // Serial.print(inverterTemp1);
+  // Serial.print(" Inverter Temp 2: ");
+  // Serial.print(inverterTemp2);
   Serial.print(" Avg Inverter Temp: ");
   Serial.println(avgInverterTemp);
   Serial.print("  Torque Request: ");
@@ -1753,7 +1759,7 @@ void showInfo()
   Serial.print("Avg motor Temp: ");
   Serial.println(avgMotorTemp);
   Serial.print("Motor HV: ");
-  Serial.print(motorHVbatteryVolts);
+  Serial.print(motorHVbatteryVolts);  
   Serial.print("  motor Torque: ");
   Serial.print(motorTorque);
   Serial.print("  Motor Amps1: ");
@@ -1768,17 +1774,15 @@ void loadDefault() // Load the defaul values
 {
   tempGaugeMin = 18;  // Temp Gauge min PWM
   tempGaugeMax = 128; // Temp Gauge Max PWM
-
-  pumpOnTemp = 32;
-  pumpoffTemp = 30;
-
+  chargerstop = 340; // stop charger
+  pumpOnTemp = 30;
   fanOnTemp = 30;
-  fanOffTemp = 25;
-  maxTorque = 30;      // Not used curently
+  Regen = 100;
+  maxTorque = 2000;      // Not used curently
   minTorque = 0;        // Not used  curently
-  tpslowOffset = 1400;  // Value when i just put my foot on the pedal and push a bit when reading the offset
-  tpshighOffset = 4000; // Value when pedal fully pressed 
-  torqueIncrement = 10; // Value to ramp tourqe by
+  tpslowOffset = 1480;  // Value when i just put my foot on the pedal and push a bit when reading the offset
+  tpshighOffset = 4080; // Value when pedal fully pressed 
+  torqueIncrement = 50; // Value to ramp tourqe by
   active_map = 1;
 
   Serial.println("Loaded Default Vlues");
@@ -1790,11 +1794,9 @@ void saveVarsToEEPROM() // Save Values to EEPROM
   EEPROM.update(1, tempGaugeMin);
   EEPROM.update(2, tempGaugeMax);
   EEPROM.update(3, pumpOnTemp);
-  EEPROM.update(4, pumpoffTemp);
-  EEPROM.update(5, fanOffTemp);
   EEPROM.update(6, fanOnTemp);
-
   EEPROM.update(8, minTorque);
+  EEPROM.update(9, chargerstop);
   EEPROM.update(20, lowByte(tpslowOffset));
   EEPROM.update(21, highByte(tpslowOffset));
   EEPROM.update(22, lowByte(tpshighOffset));
@@ -1802,6 +1804,7 @@ void saveVarsToEEPROM() // Save Values to EEPROM
   EEPROM.update(30, lowByte(maxTorque));
   EEPROM.update(31, highByte(maxTorque));
   EEPROM.update(11, torqueIncrement);
+  EEPROM.update(12, Regen);
   Serial.println("Finished Writing Values to EEPROM...");
 }
 
@@ -1832,7 +1835,7 @@ void stateHandler()
   digitalWrite(OUT6, LOW);
   digitalWrite(OUT7, LOW);
   digitalWrite(OUT8, LOW);
-  analogWrite(OUT9, LOW);
+  digitalWrite(OUT9, LOW);
   digitalWrite(OUT10, HIGH);
   digitalWrite(OUT11, LOW);
   digitalWrite(OUT12, LOW);
@@ -1995,7 +1998,8 @@ void stateHandler()
         }
       }
     }
-inverterComms(); 
+tone(OUT9, 3000);    
+Speedo();  // speedo     
 HeaterComms();
 
    if (digitalRead(ISO_IN5) == LOW)  {
@@ -2152,6 +2156,11 @@ BMS_Status = 2;
       targetTorque = 0;
     }
 
+     if (motorRPM > 10000)  // when motor RPM is larger than 10K we remove torque
+      {
+        torqueRequest = 0;
+      }
+
     if (brake_pedal == 0 && motorRPM < 30)  //if brake is pressed and motor rpm is less than 30rpm
     {
       torqueRequest = 0;       // 0 Torque if the brake is presed and we are nearly stopped
@@ -2163,8 +2172,8 @@ BMS_Status = 2;
       brakeDelay = 0;
       digitalWrite(OUT4, LOW); // Brake Lights off
     }
-
-inverterComms(); 
+Speedo();  // speedo 
+inverterComms();
 HeaterComms();
 
    if (digitalRead(ISO_IN5) == LOW)  {
@@ -2257,8 +2266,8 @@ BMS_Status = 2;
     {
       torqueRequest = 0; // 0 Torque if the brake is presed
     }
-
-inverterComms(); 
+Speedo(); // speedo 
+inverterComms();
 HeaterComms();
 
    if (digitalRead(ISO_IN5) == LOW)  {
@@ -2389,8 +2398,25 @@ else {
   digitalWrite(OUT5, LOW);
 }
 
-        HeaterComms();
-        EvseStart(); //start charging if precharge is done and BMS is in correct state
+if (chargerTempCH > fanOnTemp)
+    {
+      if (fanState == 0)
+      {
+        digitalWrite(OUT6, HIGH);
+        fanState = 1;
+      }
+    }
+    else if (chargerTempCH < (fanOnTemp - 5))
+    {
+      if (fanState == 1)
+      {
+        digitalWrite(OUT6, LOW);
+        fanState = 0;
+      }
+    }
+
+HeaterComms();
+EvseStart(); //start charging if precharge is done and BMS is in correct state
 
       }
       else if (BMS_Status != 3)
