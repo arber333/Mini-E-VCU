@@ -32,3 +32,7 @@ Additional code to revert from each of defined VCU states back to "ready" state 
 - Identified out two lines that govern direction of torque in code that work as i wanted. Providing negative attribute will reverse direction.
   "targetTorque = (throttlePosition * pedal_offset) * 2;"
   "torqueRequest = throttlePosition * -6;"
+4.2.24
+- Identified "Overcurrent" sensing code and comment it
+- Setup serial to setup regen on the fly
+- changed "torqueRequest" to 2000 in both directions
