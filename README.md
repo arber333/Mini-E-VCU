@@ -37,3 +37,8 @@ Additional code to revert from each of defined VCU states back to "ready" state 
 - Identified "Overcurrent" sensing code and comment it
 - Setup serial to setup regen on the fly
 - changed "torqueRequest" to 2000 in both directions
+  
+14.2.24
+- Torque limiter changed to 2800 with no significant effect
+- Throttle Map3 adapted to all around acceleration, throttle off regen set to *-1 
+- Throttle Map1 adapted to slower acceleration and inhibit regen
