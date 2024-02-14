@@ -89,7 +89,7 @@ void HeaterComms();
 
 // Timer for BMS heartbeat
 IntervalTimer BMStimer;
-
+IntervalTimer BMSread;
 // Metro Timers
 
 Metro timer50_1 = Metro(50);     // inverter timer
@@ -234,7 +234,7 @@ int selectdir = -1; // Select direction of motor rotation
 int inverterTemp1 = 0;
 int inverterTemp2 = 0;
 int avgInverterTemp = 0;
-const int HVprecharge = 320; //precharge voltage
+const int HVprecharge = 300; //precharge voltage
 
 byte torqueHibyte = 0;
 byte torqueLoByte = 0;
@@ -260,21 +260,20 @@ uint8_t fanState = 0;
 
 uint8_t tempGaugeMin = EEPROM.read(1); // Temp Gauge min PWM  
 uint8_t tempGaugeMax = EEPROM.read(2); // Temp Gauge Max PWM
-
 uint8_t pumpOnTemp = EEPROM.read(3);
 uint8_t fanOnTemp = EEPROM.read(6);
+uint8_t minTorque = EEPROM.read(8);   // Used for creeping feature to be added
+uint16_t chargerstop = EEPROM.read(10) * 255 + EEPROM.read(9); // Maximal charger voltage
+uint8_t torqueIncrement = EEPROM.read(12);                       // used for ramping up torque request
+uint16_t maxTorque = EEPROM.read(31) * 255 + EEPROM.read(30);     // not used currently
+                           
+uint16_t tpslowOffset = EEPROM.read(21) * 255 + EEPROM.read(20);  // Value when foot off pedal
+uint16_t tpshighOffset = EEPROM.read(23) * 255 + EEPROM.read(22); // Value when foot on pedal
 
-uint16_t chargerstop = EEPROM.read(9); // Maximal charger voltage
-int maxTorque = EEPROM.read(31) * 255 + EEPROM.read(30);     // not used currently
-int minTorque = EEPROM.read(8);                              // Used for creeping feature to be added
-int tpslowOffset = EEPROM.read(21) * 255 + EEPROM.read(20);  // Value when foot off pedal
-int tpshighOffset = EEPROM.read(23) * 255 + EEPROM.read(22); // Value when foot on pedal
-int torqueIncrement = EEPROM.read(11);                       // used for ramping up torque request
-uint8_t Regen = EEPROM.read(12); 
 uint8_t setTpsLow = 0;
 uint8_t setTpsHigh = 0;
 
-uint8_t active_map = 1; // Active Pedal map
+uint8_t active_map = 3; // Active Pedal map
 uint8_t map3;           // Sport MAp
 
 // Define constants
@@ -299,27 +298,27 @@ const int rpmbins[num_rpm_bins] = {
 const int pedal_map_one[21][22] = {
     // Normal
     // map 1..
-    /*250*/ {0, 0, 6, 6, 6, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5},
-    /*500*/ {-10, 0, 6, 6, 6, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5},
-    /*625*/ {-20, 0, 6, 6, 6, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5},
-    /*750*/ {-30, 0, 6, 6, 6, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5},
-    /*1000*/ {-50, 0, 6, 6, 6, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5},
-    /*1250*/ {-70, 0, 6, 6, 6, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5},
-    /*1500*/ {-90, 0, 6, 6, 6, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5},
-    /*2000*/ {-110, 0, 6, 6, 6, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5},
-    /*2500*/ {-130, 0, 6, 6, 6, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5},
-    /*3000*/ {-150, 0, 6, 6, 6, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5},
-    /*3500*/ {-150, 0, 6, 6, 6, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5},
-    /*4000*/ {-150, 0, 6, 6, 6, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5},
-    /*4500*/ {-150, 0, 6, 6, 6, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5},
-    /*5000*/ {-160, 0, 6, 6, 6, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5},
-    /*5500*/ {-180, 0, 6, 6, 6, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5},
-    /*6000*/ {-200, 0, 6, 6, 6, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5},
-    /*6500*/ {-200, 0, 6, 6, 6, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5},
-    /*7000*/ {-225, 0, 6, 6, 6, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5},
-    /*7500*/ {-250, 0, 6, 6, 6, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5},
-    /*8000*/ {-300, 0, 6, 6, 6, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5},
-    /*10000*/ {-300, 0, 6, 6, 6, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5},
+    /*250*/ {0, 0, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 8, 10},
+    /*500*/ {-10, 0, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 8, 10},
+    /*625*/ {-20, 0, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 8, 10},
+    /*750*/ {-30, 0, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 8, 10},
+    /*1000*/ {-50, 0, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 8, 10},
+    /*1250*/ {-70, 0, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 8, 10},
+    /*1500*/ {-90, 0, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 8, 10},
+    /*2000*/ {-110, 0, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 8, 10},
+    /*2500*/ {-130, 0, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 8, 10},
+    /*3000*/ {-150, 0, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 8, 10},
+    /*3500*/ {-150, 0, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 8, 10},
+    /*4000*/ {-150, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 8, 10},
+    /*4500*/ {-150, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 8, 10},
+    /*5000*/ {-160, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 8, 10},
+    /*5500*/ {-180, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 8, 10},
+    /*6000*/ {-200, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 8, 10},
+    /*6500*/ {-200, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 8, 10},
+    /*7000*/ {-225, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 8, 10},
+    /*7500*/ {-250, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 8, 10},
+    /*8000*/ {-300, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 8, 10},
+    /*10000*/ {-300, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 8, 10},
 };
 
 const int pedal_map_two[21][22] = {
@@ -351,27 +350,27 @@ const int pedal_map_two[21][22] = {
 const int pedal_map_three[21][22] = {
     // Sport
     // map 3..
-    /*250*/ {0, 0, 7, 7, 7, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 6},
-    /*500*/ {-10, 0, 7, 7, 7, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 6},
-    /*625*/ {-20, 0, 7, 7, 7, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 6},
-    /*750*/ {-30, 0, 7, 7, 7, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 6},
-    /*1000*/ {-50, 0, 7, 7, 7, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 6},
-    /*1250*/ {-70, 0, 7, 7, 7, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 6},
-    /*1500*/ {-90, 0, 7, 7, 7, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 6},
-    /*2000*/ {-110, 0, 7, 7, 7, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 6},
-    /*2500*/ {-130, 0, 7, 7, 7, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 6},
-    /*3000*/ {-150, 0, 7, 7, 7, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 6},
-    /*3500*/ {-150, 0, 7, 7, 7, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 6},
-    /*4000*/ {-150, 0, 7, 7, 7, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 6},
-    /*4500*/ {-150, 0, 7, 7, 7, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 6},
-    /*5000*/ {-160, 0, 7, 7, 7, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 6},
-    /*5500*/ {-180, 0, 7, 7, 7, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 6},
-    /*6000*/ {-200, 0, 7, 7, 7, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 6},
-    /*6500*/ {-200, 0, 7, 7, 7, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 6},
-    /*7000*/ {-225, 0, 7, 7, 7, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 6},
-    /*7500*/ {-250, 0, 7, 7, 7, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 6},
-    /*8000*/ {-300, 0, 7, 7, 7, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 6},
-    /*10000*/ {-300, 0, 7, 7, 7, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 6},
+    /*250*/ {0, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
+    /*500*/ {-10, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
+    /*625*/ {-20, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
+    /*750*/ {-30, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
+    /*1000*/ {-50, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
+    /*1250*/ {-70, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
+    /*1500*/ {-90, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
+    /*2000*/ {-110, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
+    /*2500*/ {-130, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
+    /*3000*/ {-150, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
+    /*3500*/ {-150, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
+    /*4000*/ {-150, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 8, 9, 10, 10, 10, 10, 12, 12, 14, 14},
+    /*4500*/ {-150, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 14, 14},
+    /*5000*/ {-160, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 14},
+    /*5500*/ {-180, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
+    /*6000*/ {-200, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
+    /*6500*/ {-200, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
+    /*7000*/ {-225, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
+    /*7500*/ {-250, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
+    /*8000*/ {-300, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
+    /*10000*/ {-300, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
 };
 
 void setup()
@@ -415,6 +414,7 @@ void setup()
   Can2.enableMBInterrupts();
   Can3.setMBFilter(REJECT_ALL);
   Can3.enableMBInterrupts();
+
   Can2.onReceive(MB0, canRX_377); // Charger LV Stats
   Can2.onReceive(MB1, canRX_38A); // Charger LV Stats
   Can2.onReceive(MB2, canRX_389); // Charger HV Stats
@@ -423,6 +423,15 @@ void setup()
   Can2.onReceive(MB5, canRX_299); // Inverter Temps
   Can2.onReceive(MB6, canRX_732); // Inverter current
   Can2.onReceive(MB7, canRX_733); // Inverter Temps
+  
+ Can1.onReceive(MB11, canRX_001); // BMS Status
+/* Can1.onReceive(MB12, canRX_002); // BMS Status
+ Can1.onReceive(MB13, canRX_003); // BMS Status
+ Can1.onReceive(MB14, canRX_004); // BMS Status
+ Can1.onReceive(MB12, canRX_005); // BMS Status
+ Can1.onReceive(MB13, canRX_006); // BMS Status
+ Can1.onReceive(MB14, canRX_007); // BMS Status
+*/
 
   Can2.setMBFilter(MB0, 0x377);
   Can2.setMBFilter(MB1, 0x38A);
@@ -432,7 +441,7 @@ void setup()
   Can2.setMBFilter(MB5, 0x299);
   Can2.setMBFilter(MB6, 0x732);
   Can2.setMBFilter(MB7, 0x733);
-  Can1.setMBFilterRange(MB1, 0x01,0x07);
+  Can1.setMBFilterRange(MB11, 0x01,0x07);
 
   Can1.mailboxStatus();
   Can2.mailboxStatus();
@@ -500,6 +509,7 @@ void setup()
   config.callback = wdtCallback;
   wdt.begin(config);
   BMStimer.begin(bmsComms, 10000);
+  BMSread.begin(BMS_Stat, 500000);
 
   Serial.begin(9600);
   Serial.println("Mini-E VCU Starting Up.....");
@@ -518,9 +528,10 @@ void loop()
   Can1.events(); // Call CAN bus bus interupts
   Can2.events();
   Can3.events(); // Currently this only send.
-  BMS_Stat();
+
 //  dashComms();
   tempCheck();
+ // BMS_Stat();
   stateHandler(); 
   readPins(); 
 
@@ -596,7 +607,7 @@ void menu()
     Serial.println("5 - Set Temp Gauge High Value");
     Serial.println("6 - Set Pedal Lo Offset");
     Serial.println("7 - Set Pedal High Offset");
-    Serial.println("8 - Set Regen Tourqe");
+    // Serial.println("8 - Set Regen Tourqe");
     Serial.println("9 - Set Map");
     Serial.println("0 - Set Torque Increment");
     Serial.println("U - Charger Stop Voltage");
@@ -718,24 +729,24 @@ void menu()
 
     break;
 
-  case '8':
+ /* case '8':
   {
     int value = Serial.parseInt();
     if (value > 1000)
     {
-      value = 1000;
+      value = 0;
     }
     if (value < 0)
     {
       value = 0;
     }
-    Regen = value;
+     = value;
     Serial.print("Regen Toruqe: ");
     Serial.println(value);
     menuLoad = 0;
 
     break;
-  }
+  } */
 
   case '9':
   {
@@ -1046,61 +1057,61 @@ void dogFood()
 
 void BMS_Stat()
 {
- if (timer1000_3.check() == 1)
-{
-  BMS_avgtmp = 0;
+// if (timer1000_2.check() == 1) {
+	
+BMS_avgtmp = 0;
 BMS_packvoltage = 0.00;  
 memset(BMS_Volt, 0, sizeof(BMS_Volt)); 
    Serial.println("BMS_Stat");
+
    msg.id = 0x01;
     msg.len = 1;
     msg.buf[0] = 0xFF;
     Can1.write(msg);
-    Can2.write(msg);
-    Can3.write(msg);
+//    Can2.write(msg);
+//    Can3.write(msg);
     
-
-    delay(2); 
+   // delay(2); 
     msg.id = 0x02;
     msg.len = 1;
     msg.buf[0] = 0xFF;
     Can1.write(msg);
 
-    delay(2); 
+    //delay(2); 
     msg.id = 0x03;
     msg.len = 1;
     msg.buf[0] = 0xFF;
     Can1.write(msg);
 
-    delay(2); 
+    //delay(2); 
     msg.id = 0x04;
     msg.len = 1;
     msg.buf[0] = 0xFF;
     Can1.write(msg);
     
-    delay(2); 
+    //delay(2); 
     msg.id = 0x05;
     msg.len = 1;
     msg.buf[0] = 0xFF;
     Can1.write(msg);
 
-    delay(2); 
+    //delay(2); 
     msg.id = 0x06;
     msg.len = 1;
     msg.buf[0] = 0xFF;
     Can1.write(msg);
 
-    delay(2); 
+    //delay(2); 
     msg.id = 0x07;
     msg.len = 1;
     msg.buf[0] = 0xFF;
     Can1.write(msg);
 
-delay(200); 
+//delay(200); 
  BMS_max = 0;
   BMS_min = 5;
   BMS_packvoltage = 0;
- for(int i=0; i<sizeof(BMS_Volt)/sizeof(int);i++) {
+ for(uint8_t i=0; i<sizeof(BMS_Volt)/sizeof(int);i++) {
 
   BMS_max = max(BMS_Volt[i],BMS_max);
  if (BMS_Volt[i] > 0)
@@ -1129,7 +1140,7 @@ if (BMS_discurrent > 0)
       }
 
 }
-}
+//}
 }
 
 void canRX_289(const CAN_message_t &msg)
@@ -1352,8 +1363,10 @@ void inverterComms()
 
       if (curentTorque < targetTorque)
       {
-        curentTorque += torqueIncrement;
-        torqueRequest = curentTorque;
+     //   curentTorque += torqueIncrement;
+     //   torqueRequest = curentTorque;
+       torqueRequest = targetTorque;
+       curentTorque = torqueRequest;    
       }
 
       if (curentTorque >= targetTorque)
@@ -1374,12 +1387,21 @@ void inverterComms()
       curentTorque = torqueRequest;
     }
 
+   if (active_map == 1 && VCUstatus == 4) // Regen in map1 is to be off
+    {
+        regenState = 0;
+        regenTarget = 0;
+        regenRequest = 0;
+        brakeDelay = 0;
+    }
+
+
     if (regenState == 1 && VCUstatus == 4)
 
     {
       if (regenTarget < regenRequest) // increment Regen
       {
-        regenRequest -= Regen;
+        regenRequest -= 5; 
         torqueRequest = regenRequest;
         // Serial.println("Regen inc.");
       }
@@ -1393,20 +1415,20 @@ void inverterComms()
     {
       if (regenTarget > regenRequest) // increment Regen off
       {
-        regenRequest += Regen;
+        regenRequest += 20; 
         torqueRequest = regenRequest;
         // Serial.println("Regen Dec.");
       }
     }
 
-    if (torqueRequest > (2000))
+    if (torqueRequest > (2800)) // Going for 230Nm
     {
-      torqueRequest = 0;
+      torqueRequest = 2800;
       Serial.println("--!OVER TOURQUE!--");
     }
-    if (torqueRequest < (-2000))
+    if (torqueRequest < (-2800))
     {
-      torqueRequest = 0;
+      torqueRequest = -2800;
       Serial.println("--!UNDER TOURQUE!--");
     }
 
@@ -1493,7 +1515,7 @@ void BMS_Read()
  BMS_max = 0;
   BMS_min = 5;
   BMS_packvoltage = 300;
- for(int i=0; i<sizeof(BMS_Volt)/sizeof(int);i++){
+ for(uint8_t i=0; i<sizeof(BMS_Volt)/sizeof(int);i++){
  // Serial.print("Элемент ");
  //   Serial.print(i);
  //   Serial.print(": ");
@@ -1740,14 +1762,12 @@ void showInfo()
   Serial.print(chargerTempCH);
   Serial.print("  DCDC Temp: ");
   Serial.println(DCDCTemp);
-  // Serial.print("Inverter Temp 1: ");
-  // Serial.print(inverterTemp1);
-  // Serial.print(" Inverter Temp 2: ");
-  // Serial.print(inverterTemp2);
   Serial.print(" Avg Inverter Temp: ");
   Serial.println(avgInverterTemp);
   Serial.print("  Torque Request: ");
   Serial.println(torqueRequest);
+  Serial.print("  Torque Increment: ");
+  Serial.println(torqueIncrement);
   Serial.print("RPM: ");
   Serial.print(motorRPM);
   Serial.print(" Motor Peak Temp: ");
@@ -1766,6 +1786,10 @@ void showInfo()
   Serial.print(motorCurrent1);
   Serial.print("  Motor amps2: ");
   Serial.println(motorCurrent2);
+  Serial.print("throttle low offset: ");
+  Serial.print(tpslowOffset);
+  Serial.print(" throttle high offset: ");
+  Serial.print(tpshighOffset);
   Serial.print("Loop Time: ");
   Serial.print(loopTime);
 }
@@ -1777,15 +1801,15 @@ void loadDefault() // Load the defaul values
   chargerstop = 340; // stop charger
   pumpOnTemp = 30;
   fanOnTemp = 30;
-  Regen = 100;
   maxTorque = 2000;      // Not used curently
   minTorque = 0;        // Not used  curently
-  tpslowOffset = 1480;  // Value when i just put my foot on the pedal and push a bit when reading the offset
+  tpslowOffset = 1700;  // Value when i just put my foot on the pedal and push a bit when reading the offset
   tpshighOffset = 4080; // Value when pedal fully pressed 
-  torqueIncrement = 50; // Value to ramp tourqe by
-  active_map = 1;
+  torqueIncrement = 20; // Value to ramp tourqe by
+  active_map = 3;
 
   Serial.println("Loaded Default Vlues");
+
 }
 
 void saveVarsToEEPROM() // Save Values to EEPROM
@@ -1796,15 +1820,16 @@ void saveVarsToEEPROM() // Save Values to EEPROM
   EEPROM.update(3, pumpOnTemp);
   EEPROM.update(6, fanOnTemp);
   EEPROM.update(8, minTorque);
-  EEPROM.update(9, chargerstop);
+  EEPROM.update(9, lowByte(chargerstop));
+  EEPROM.update(10, highByte(chargerstop));
+  EEPROM.update(12, torqueIncrement); 
   EEPROM.update(20, lowByte(tpslowOffset));
   EEPROM.update(21, highByte(tpslowOffset));
   EEPROM.update(22, lowByte(tpshighOffset));
   EEPROM.update(23, highByte(tpshighOffset));
   EEPROM.update(30, lowByte(maxTorque));
   EEPROM.update(31, highByte(maxTorque));
-  EEPROM.update(11, torqueIncrement);
-  EEPROM.update(12, Regen);
+
   Serial.println("Finished Writing Values to EEPROM...");
 }
 
@@ -2080,12 +2105,12 @@ BMS_Status = 2;
 
      if ( map3 == 0)
     {
-      active_map = 3;
-           digitalWrite(OUT6, HIGH); // Fan on   
+      active_map = 1;
+          // digitalWrite(OUT6, HIGH); // Fan on   
     }
      else
     {
-      active_map = 1;
+      active_map = 3;
     }
 
     switch (active_map)
@@ -2115,7 +2140,7 @@ BMS_Status = 2;
       regenState = 2;
       regenTarget = 0;
 
-      if (regenRequest >= -9)
+      if (regenRequest >= -9) 
       {
         regenState = 0;
         regenTarget = 0;
@@ -2127,7 +2152,7 @@ BMS_Status = 2;
     else if (pedal_offset > 1 && regenState != 2)
     {
       inverterFunction = 0x03;                              // Enable inverter
-      targetTorque = (throttlePosition * pedal_offset) * -2; //*2 because we are 200nm Max torque
+      targetTorque = (throttlePosition * pedal_offset) * -2; // *2 for OEM because we are 200nm Max torque
       regenState = 0;
       regenTarget = 0;
       regenRequest = 0;
@@ -2138,12 +2163,12 @@ BMS_Status = 2;
 
       inverterFunction = 0x03;
       regenState = 1;
-      regenTarget = pedal_offset * 2;
+      regenTarget = pedal_offset * -1; // previously +2 for OEM direction
       if (brake_pedal == 1 && brakeDelay == 0)
       {
         brakeDelay = millis();
       }
-      if (brake_pedal == 1 && brakeDelay + 1000 < millis() && regenRequest < -9)
+      if (brake_pedal == 1 && brakeDelay + 1000 < millis() && regenRequest < -9) 
       {
         digitalWrite(OUT4, HIGH);
         brakeDelay = 0;
@@ -2254,7 +2279,7 @@ BMS_Status = 2;
 
     if (throttlePosition > 5)
     {
-      torqueRequest = throttlePosition * 6; // lets make the pedal less responsive
+      torqueRequest = throttlePosition * 5; // lets make the pedal less responsive *6
       inverterFunction = 0x03;
       if (motorRPM < -2000)
       {
