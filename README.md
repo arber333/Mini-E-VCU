@@ -42,5 +42,6 @@ Additional code to revert from each of defined VCU states back to "ready" state 
 - Torque limiter changed to 2800 with no significant effect
 - Throttle Map3 adapted to all around acceleration, throttle off regen set to *-1 
 - Throttle Map1 adapted to slower acceleration and inhibit regen
+  
 9.3.24
 - I removed other CAN lines other than CAN2 in code as other CAN lines would clutter interrupts on Teensy.
