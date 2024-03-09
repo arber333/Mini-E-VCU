@@ -31,9 +31,7 @@
 #include <Teensy_PWM.h>
 // CAN Setup
 
-FlexCAN_T4<CAN1, RX_SIZE_256, TX_SIZE_16> Can1;
 FlexCAN_T4<CAN2, RX_SIZE_256, TX_SIZE_16> Can2;
-FlexCAN_T4<CAN3, RX_SIZE_256, TX_SIZE_16> Can3;
 
 #define NUM_TX_MAILBOXES 15
 #define NUM_RX_MAILBOXES 15
@@ -53,26 +51,16 @@ signed long loopTime = 0;
 
 void canRX_289(const CAN_message_t &msg); // Inverter RPM, Battery and Torque
 void canRX_299(const CAN_message_t &msg); // Inverter Temps
-void canRX_351(const CAN_message_t &msg); // BMS Status
-void canRX_001(const CAN_message_t &msg); // BMS Status *
-void canRX_002(const CAN_message_t &msg); // BMS Status *
-void canRX_003(const CAN_message_t &msg); // BMS Status *
-void canRX_004(const CAN_message_t &msg); // BMS Status *
-void canRX_005(const CAN_message_t &msg); // BMS Status *
-void canRX_006(const CAN_message_t &msg); // BMS Status * 
-void canRX_007(const CAN_message_t &msg); // BMS Status *
-void canRX_356(const CAN_message_t &msg); // BMS HV Voltage
 void canRX_377(const CAN_message_t &msg); // Outlander Charger Low voltage stats
 void canRX_38A(const CAN_message_t &msg); // Outlander Charger EVSE
 void canRX_389(const CAN_message_t &msg); // Outlander Charger HV stats
 void canRX_398(const CAN_message_t &msg); // Outlander Heater stats
 void canRX_732(const CAN_message_t &msg); // Inverter Current
 void canRX_733(const CAN_message_t &msg); // Inverter Temps
-void dashComms();                         // update the dash-board
 void bmsComms();                          // Comms to the BMS - Set Key on
 
 void dogFood();
-void BMS_Stat(); //*
+// void BMS_Stat(); //*
 void BMS_Read(); //*
 void menu();
 void readPins();
@@ -89,15 +77,16 @@ void HeaterComms();
 
 // Timer for BMS heartbeat
 IntervalTimer BMStimer;
-IntervalTimer BMSread;
+IntervalTimer Speedread;
+
 // Metro Timers
 
-Metro timer50_1 = Metro(50);     // inverter timer
+Metro timer50_1 = Metro(30);     // inverter timer
 Metro timer50_2 = Metro(50);     // De-bounce check
 Metro timer100_1 = Metro(100);   // 2nd inverter timer
 Metro timer100_2 = Metro(96);    // longer Debounce
 Metro timer100_3 = Metro(110);   // Temp handler
-Metro timer100_4 = Metro(100);   // Speedo handler
+Metro timer100_4 = Metro(50);   // Speedo handler
 Metro timer500_1 = Metro(50);    // pedal debug timer
 Metro timer500_2 = Metro(500);    // Charger timer
 Metro timer5_1 = Metro(5);    // BMS_Stat *
@@ -236,6 +225,9 @@ int inverterTemp2 = 0;
 int avgInverterTemp = 0;
 const int HVprecharge = 300; //precharge voltage
 
+byte chargerstopLoByte = 0;
+byte chargerstopHibyte = 0;
+
 byte torqueHibyte = 0;
 byte torqueLoByte = 0;
 int torqueRequest = 0;
@@ -322,29 +314,29 @@ const int pedal_map_one[21][22] = {
 };
 
 const int pedal_map_two[21][22] = {
-    // ECO
-    // map 2..
-    /*250*/ {0, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6},
-    /*500*/ {-10, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6},
-    /*625*/ {-20, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6},
-    /*750*/ {-30, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6},
-    /*1000*/ {-50, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6},
-    /*1250*/ {-70, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6},
-    /*1500*/ {-90, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6},
-    /*2000*/ {-110, 0, 0, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6},
-    /*2500*/ {-130, 0, 0, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6},
-    /*3000*/ {-150, 0, 0, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6},
-    /*3500*/ {-150, 0, 0, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6},
-    /*4000*/ {-150, 0, 0, 3, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6},
-    /*4500*/ {-150, 0, 0, 3, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6},
-    /*5000*/ {-160, 0, 0, 3, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6},
-    /*5500*/ {-180, 0, 0, 3, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6},
-    /*6000*/ {-200, 0, 0, 3, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6},
-    /*6500*/ {-200, 0, 0, 3, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6},
-    /*7000*/ {-225, 0, 0, 3, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6},
-    /*7500*/ {-250, 0, 0, 3, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6},
-    /*8000*/ {-300, 0, 0, 3, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6},
-    /*10000*/ {-300, 0, 0, 3, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6},
+    // Sport
+    // map 3..
+    /*250*/ {0, 0, 3, 6, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 10, 18, 20, 20, 20, 20, 20},
+    /*500*/ {-10, 0, 3, 6, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 10, 14, 20, 20, 20, 20, 20},
+    /*625*/ {-20, 0, 3, 6, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 10, 12, 14, 18, 20, 20, 20},
+    /*750*/ {-30, 0, 3, 6, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 14, 18, 20, 20},
+    /*1000*/ {-50, 0, 3, 6, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 12, 14, 18, 20},
+    /*1250*/ {-70, 0, 3, 6, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 12, 12, 14, 18},
+    /*1500*/ {-90, 0, 3, 6, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 12, 12, 14, 18},
+    /*2000*/ {-110, 0, 3, 4, 5, 5, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 12, 12, 14, 16},
+    /*2500*/ {-130, 0, 3, 4, 5, 5, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 12, 12, 14, 16},
+    /*3000*/ {-150, 0, 3, 4, 5, 5, 6, 7, 8, 8, 8, 8, 8, 8, 10, 10, 10, 12, 12, 14, 16},
+    /*3500*/ {-150, 0, 3, 4, 5, 5, 6, 7, 8, 8, 8, 8, 8, 8, 10, 10, 10, 12, 12, 14, 16},
+    /*4000*/ {-150, 0, 3, 4, 5, 5, 6, 7, 8, 8, 8, 8, 8, 8, 10, 10, 10, 12, 12, 14, 16},
+    /*4500*/ {-150, 0, 3, 4, 5, 5, 6, 7, 8, 8, 8, 8, 8, 8, 10, 10, 10, 12, 12, 14, 16},
+    /*5000*/ {-160, 0, 3, 4, 5, 5, 6, 7, 8, 8, 8, 8, 8, 8, 10, 10, 10, 12, 12, 12, 14},
+    /*5500*/ {-180, 0, 3, 4, 5, 5, 6, 7, 8, 8, 8, 8, 8, 8, 10, 10, 10, 12, 12, 12, 14},
+    /*6000*/ {-200, 0, 3, 4, 5, 5, 6, 7, 8, 8, 8, 8, 8, 8, 10, 10, 10, 12, 12, 12, 14},
+    /*6500*/ {-200, 0, 3, 4, 5, 5, 6, 7, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 12, 14},
+    /*7000*/ {-225, 0, 3, 4, 5, 5, 6, 7, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 12, 12},
+    /*7500*/ {-250, 0, 3, 4, 5, 5, 6, 7, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 12, 12},
+    /*8000*/ {-300, 0, 3, 4, 5, 5, 6, 6, 7, 7, 8, 8, 8, 8, 8, 9, 9, 10, 12, 12, 12},
+    /*10000*/ {-300, 0, 3, 4, 5, 5, 6, 6, 7, 7, 8, 8, 8, 8, 8, 9, 9, 10, 12, 12, 12},
 };
 
 const int pedal_map_three[21][22] = {
@@ -378,42 +370,23 @@ void setup()
 
   // Setup Can
 
-  Can1.begin();
   Can2.begin();
-  Can3.begin();
-  Can1.setBaudRate(250000);
-  Can2.setBaudRate(500000);
-  Can3.setBaudRate(500000);
 
-  Can1.setMaxMB(NUM_TX_MAILBOXES + NUM_RX_MAILBOXES);
-  for (int i = 0; i < NUM_RX_MAILBOXES; i++)
-  {
-    Can1.setMB((FLEXCAN_MAILBOX)i, RX, STD);
-  }
+  Can2.setBaudRate(500000);
+
   Can2.setMaxMB(NUM_TX_MAILBOXES + NUM_RX_MAILBOXES);
   for (int i = 0; i < NUM_RX_MAILBOXES; i++)
   {
     Can2.setMB((FLEXCAN_MAILBOX)i, RX, STD);
   }
-  Can3.setMaxMB(NUM_TX_MAILBOXES + NUM_RX_MAILBOXES);
-  for (int i = 0; i < NUM_RX_MAILBOXES; i++)
-  {
-    Can3.setMB((FLEXCAN_MAILBOX)i, RX, STD);
-  }
 
   for (int i = NUM_RX_MAILBOXES; i < (NUM_TX_MAILBOXES + NUM_RX_MAILBOXES); i++)
   {
-    Can1.setMB((FLEXCAN_MAILBOX)i, TX, STD); // *
     Can2.setMB((FLEXCAN_MAILBOX)i, TX, STD);
-    Can3.setMB((FLEXCAN_MAILBOX)i, TX, STD);
   }
 
-  Can1.setMBFilter(REJECT_ALL);
-  Can1.enableMBInterrupts();
   Can2.setMBFilter(REJECT_ALL);
   Can2.enableMBInterrupts();
-  Can3.setMBFilter(REJECT_ALL);
-  Can3.enableMBInterrupts();
 
   Can2.onReceive(MB0, canRX_377); // Charger LV Stats
   Can2.onReceive(MB1, canRX_38A); // Charger LV Stats
@@ -424,15 +397,6 @@ void setup()
   Can2.onReceive(MB6, canRX_732); // Inverter current
   Can2.onReceive(MB7, canRX_733); // Inverter Temps
   
- Can1.onReceive(MB11, canRX_001); // BMS Status
-/* Can1.onReceive(MB12, canRX_002); // BMS Status
- Can1.onReceive(MB13, canRX_003); // BMS Status
- Can1.onReceive(MB14, canRX_004); // BMS Status
- Can1.onReceive(MB12, canRX_005); // BMS Status
- Can1.onReceive(MB13, canRX_006); // BMS Status
- Can1.onReceive(MB14, canRX_007); // BMS Status
-*/
-
   Can2.setMBFilter(MB0, 0x377);
   Can2.setMBFilter(MB1, 0x38A);
   Can2.setMBFilter(MB2, 0x389);
@@ -441,11 +405,8 @@ void setup()
   Can2.setMBFilter(MB5, 0x299);
   Can2.setMBFilter(MB6, 0x732);
   Can2.setMBFilter(MB7, 0x733);
-  Can1.setMBFilterRange(MB11, 0x01,0x07);
 
-  Can1.mailboxStatus();
   Can2.mailboxStatus();
-  Can3.mailboxStatus();
 
   // Setup ADC
 
@@ -508,8 +469,8 @@ void setup()
   config.timeout = 5; // in seconds, 0->128
   config.callback = wdtCallback;
   wdt.begin(config);
-  BMStimer.begin(bmsComms, 10000);
-  BMSread.begin(BMS_Stat, 500000);
+  BMStimer.begin(bmsComms, 30000);
+  Speedread.begin(Speedo, 100000);
 
   Serial.begin(9600);
   Serial.println("Mini-E VCU Starting Up.....");
@@ -525,13 +486,9 @@ void loop()
   long loopTimestart = micros();
   dogFood(); // Reset the Watchdog
 
-  Can1.events(); // Call CAN bus bus interupts
   Can2.events();
-  Can3.events(); // Currently this only send.
 
-//  dashComms();
   tempCheck();
- // BMS_Stat();
   stateHandler(); 
   readPins(); 
 
@@ -556,15 +513,12 @@ void loop()
   }
 
 
- // Speedo(); // speedo 
-
  if (Heater_pin == 0)  {
   digitalWrite(OUT5, HIGH);
 }
 else {
   digitalWrite(OUT5, LOW);
 }
-
 
   if (timer30s_1.check()==1)  //Check the DC-DC so we only enable when needed.
   {
@@ -1055,93 +1009,6 @@ void dogFood()
 
 // CAN Functions
 
-void BMS_Stat()
-{
-// if (timer1000_2.check() == 1) {
-	
-BMS_avgtmp = 0;
-BMS_packvoltage = 0.00;  
-memset(BMS_Volt, 0, sizeof(BMS_Volt)); 
-   Serial.println("BMS_Stat");
-
-   msg.id = 0x01;
-    msg.len = 1;
-    msg.buf[0] = 0xFF;
-    Can1.write(msg);
-//    Can2.write(msg);
-//    Can3.write(msg);
-    
-   // delay(2); 
-    msg.id = 0x02;
-    msg.len = 1;
-    msg.buf[0] = 0xFF;
-    Can1.write(msg);
-
-    //delay(2); 
-    msg.id = 0x03;
-    msg.len = 1;
-    msg.buf[0] = 0xFF;
-    Can1.write(msg);
-
-    //delay(2); 
-    msg.id = 0x04;
-    msg.len = 1;
-    msg.buf[0] = 0xFF;
-    Can1.write(msg);
-    
-    //delay(2); 
-    msg.id = 0x05;
-    msg.len = 1;
-    msg.buf[0] = 0xFF;
-    Can1.write(msg);
-
-    //delay(2); 
-    msg.id = 0x06;
-    msg.len = 1;
-    msg.buf[0] = 0xFF;
-    Can1.write(msg);
-
-    //delay(2); 
-    msg.id = 0x07;
-    msg.len = 1;
-    msg.buf[0] = 0xFF;
-    Can1.write(msg);
-
-//delay(200); 
- BMS_max = 0;
-  BMS_min = 5;
-  BMS_packvoltage = 0;
- for(uint8_t i=0; i<sizeof(BMS_Volt)/sizeof(int);i++) {
-
-  BMS_max = max(BMS_Volt[i],BMS_max);
- if (BMS_Volt[i] > 0)
-  {
-  BMS_min = min(BMS_Volt[i],BMS_min);
-BMS_packvoltage = BMS_packvoltage+BMS_Volt[i];
- 
-    }
-
-}
-Serial.println(BMS_packvoltage);
-BMS_SOC = map(uint16_t(BMS_avgvolt*1000), 2550, 4150, 0,100); 
-BMS_discurrent = 225;
-if (BMS_discurrent > 0)
-    {
-      //Temperature based///
-
-      if (BMS_avgtmp > 30)
-      {
-        BMS_discurrent = BMS_discurrent - map(BMS_avgtmp, 30, 100, 0, 225);
-      }
-      //Voltagee based///
-      if (BMS_min < (3.5))
-      {
-        BMS_discurrent = BMS_discurrent - map(BMS_min, 3.2, 3.5, 225, 0);
-      }
-
-}
-//}
-}
 
 void canRX_289(const CAN_message_t &msg)
 {
@@ -1160,11 +1027,6 @@ void canRX_299(const CAN_message_t &msg)
 
   avgInverterTemp = (inverterTemp1 + inverterTemp2) / 2;
 }
-
-/* void canRX_351(const CAN_message_t &msg)
-{
-//  BMS_discurrent = (((msg.buf[5] * 256) + msg.buf[4]) / 10);
-} */
 
 void canRX_001(const CAN_message_t &msg)
 {
@@ -1243,17 +1105,6 @@ if (msg.buf[0] == 1)
   }
    }
 
- // Serial.println(msg.id);
-if (msg.buf[0] == 0x01)
-  {
-   // BMS_avgtmp1=0;
-   // BMS_packvoltage1 = 0;
-     }
-
-  BMS_SOC = ((msg.buf[1] * 256) + msg.buf[0]);
-  //BMS_avgtmp = (((msg.buf[5] / 10.0) * 256) + (msg.buf[4] / 10.0));
-  //BMS_Status = 3;
-
   if (BMS_Status == 5)
   {
     if (VCUstatusChangeCounter > VCUstatusChangeThreshold)
@@ -1267,14 +1118,6 @@ if (msg.buf[0] == 0x01)
   }
 }
 
-/* void canRX_356(const CAN_message_t &msg)
-{
-
-//  BMS_packvoltage = (((msg.buf[1] * 256) / 100.0) + (msg.buf[0] / 100.0));
-
-  int amps = (msg.buf[3] * 256) + (msg.buf[2]);
-  currentact = ((amps - 3000) / 10.0);
-} */
 
 void canRX_377(const CAN_message_t &msg)
 {
@@ -1328,7 +1171,9 @@ void EvseStart()
 
  if (timer500_2.check() == 1)
   {
-  
+    chargerstopLoByte = lowByte(chargerstop*10);
+    chargerstopHibyte = highByte(chargerstop*10);
+
     msg.id = 0x286;
       msg.len = 8;
       msg.buf[0] = 0x10; //voltage 360V
@@ -1349,6 +1194,20 @@ void EvseStart()
       msg.buf[7] = 0x0;
     Can2.write(msg);
  //  Serial.println(map(chargercurrent,13,27,6,12)*10); 
+// Eltek charger commands
+
+    msg.id = 0x2FF;
+      msg.len = 8;
+      msg.buf[0] = 0x01; 
+      msg.buf[1] = 0xE8;
+      msg.buf[2] = 0x03;        
+      msg.buf[3] = chargerstopLoByte; // Voltage byte h
+      msg.buf[4] = chargerstopHibyte; // Voltage byte h
+      msg.buf[5] = 0x78; //current byte
+      msg.buf[6] = 0x00;
+      msg.buf[7] = 0x00;
+    Can2.write(msg);
+
 }
 }
 
@@ -1421,29 +1280,20 @@ void inverterComms()
       }
     }
 
-    if (torqueRequest > (2800)) // Going for 230Nm
+    if (torqueRequest > (2500)) // Going for 230Nm
     {
-      torqueRequest = 2800;
+      torqueRequest = 2500;
       Serial.println("--!OVER TOURQUE!--");
     }
-    if (torqueRequest < (-2800))
+    if (torqueRequest < (-2500))
     {
-      torqueRequest = -2800;
+      torqueRequest = -2500;
       Serial.println("--!UNDER TOURQUE!--");
     }
 
     torqueRequest = torqueRequest;
     torqueRequest += 10000;
 
-   /* if (BMS_discurrent < currentact) // Decrese tourque if we are over current - Crude needs work..
-    {
-      torqueRequest -= 20;
-      Serial.println("--!OVER CURRENT!--");
-      if (torqueRequest < 0)
-      {
-        torqueRequest = 0;
-      }
-    } */
 
     if (pedalDebug == 1)
     {
@@ -1516,15 +1366,11 @@ void BMS_Read()
   BMS_min = 5;
   BMS_packvoltage = 300;
  for(uint8_t i=0; i<sizeof(BMS_Volt)/sizeof(int);i++){
- // Serial.print("Элемент ");
- //   Serial.print(i);
- //   Serial.print(": ");
- //   Serial.println(BMS_Volt[i]);
+
   BMS_max = max(BMS_Volt[i],BMS_max);
  if (BMS_Volt[i] > 0)
   {
   BMS_min = min(BMS_Volt[i],BMS_min);
-// BMS_packvoltage = BMS_packvoltage+BMS_Volt[i];
   
     }
 }
@@ -1548,51 +1394,7 @@ if (BMS_discurrent > 0)
 }
 }
 
-void dashComms()
-{
 
-  if (timer10_1.check() == 1)
-  {
-    msg.id = 0x555;
-    msg.len = 8;
-    msg.buf[0] = highByte(motorRPM);
-    msg.buf[1] = lowByte(motorRPM);
-    msg.buf[2] = VCUstatus;
-    msg.buf[3] = BMS_Status;
-    msg.buf[4] = BMS_SOC;
-    msg.buf[5] = chargerHVbattryVolts / 2;
-    msg.buf[6] = DCDCTemp;
-    msg.buf[7] = avgMotorTemp;
-    Can3.write(msg);
-
-    int amps = ((currentact * 10) + 3000);
-    msg.id = 0x558;
-    msg.len = 8;
-    msg.buf[0] = lowByte(amps);
-    msg.buf[1] = highByte(amps);
-    msg.buf[2] = lowByte(int16_t(BMS_avgtmp * 10));
-    msg.buf[3] = highByte(int16_t(BMS_avgtmp * 10));
-    msg.buf[4] = lowByte(uint16_t(BMS_packvoltage) * 100);
-    msg.buf[5] = highByte(uint16_t(BMS_packvoltage) * 100);
-    msg.buf[6] = torqueHibyte;
-    msg.buf[7] = torqueLoByte;
-    Can3.write(msg);
-
-    msg.id = 0x560;
-    msg.len = 8;
-    msg.buf[0] = active_map;
-    msg.buf[1] = 0;
-    ;
-    msg.buf[2] = 0;
-    ;
-    msg.buf[3] = 0;  
-    msg.buf[4] = 0;
-    msg.buf[5] = 0;
-    msg.buf[6] = 0;
-    msg.buf[7] = 0;
-    Can3.write(msg);
-  }
-}
 
 void HeaterComms()
 {
@@ -1702,8 +1504,8 @@ void tempCheck()
 
 void Speedo()
 {
-if (timer100_4.check() == 1)
-  {  
+//if (timer100_4.check() == 1)
+ // {  
 calcspeed = (motorRPM / ratio) * tireD * 3.14 * 60 / 1000; // speed = wheelsRPM * tireD * PI * 60 / 1000 Km/h
 calcHz = calcspeed * 1.4;
 if (calcHz >= 0) {
@@ -1714,7 +1516,7 @@ calcHzi = calcHz * (-1);
 }
 tone(OUT7, calcHzi);
 //analogWriteFrequency(OUT7, calcHzi);
-}
+// }
 }
 
 void showInfo()
@@ -2023,8 +1825,8 @@ void stateHandler()
         }
       }
     }
-tone(OUT9, 3000);    
-Speedo();  // speedo     
+//tone(OUT9, 3000);    
+//Speedo();  // speedo     
 HeaterComms();
 
    if (digitalRead(ISO_IN5) == LOW)  {
@@ -2197,7 +1999,7 @@ BMS_Status = 2;
       brakeDelay = 0;
       digitalWrite(OUT4, LOW); // Brake Lights off
     }
-Speedo();  // speedo 
+//Speedo();  // speedo 
 inverterComms();
 HeaterComms();
 
@@ -2279,7 +2081,7 @@ BMS_Status = 2;
 
     if (throttlePosition > 5)
     {
-      torqueRequest = throttlePosition * 5; // lets make the pedal less responsive *6
+      torqueRequest = throttlePosition * 8; // lets make the pedal less responsive *6
       inverterFunction = 0x03;
       if (motorRPM < -2000)
       {
@@ -2291,7 +2093,7 @@ BMS_Status = 2;
     {
       torqueRequest = 0; // 0 Torque if the brake is presed
     }
-Speedo(); // speedo 
+//Speedo(); // speedo 
 inverterComms();
 HeaterComms();
 
