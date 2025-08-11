@@ -85,8 +85,8 @@ Metro timer50_1 = Metro(30);     // inverter timer
 Metro timer50_2 = Metro(50);     // De-bounce check
 Metro timer100_1 = Metro(100);   // 2nd inverter timer
 Metro timer100_2 = Metro(96);    // longer Debounce
-Metro timer100_3 = Metro(110);   // Temp handler
-Metro timer100_4 = Metro(50);   // Speedo handler
+Metro timer100_3 = Metro(105);   // Temp handler
+Metro timer100_4 = Metro(102);   // Speedo handler
 Metro timer500_1 = Metro(50);    // pedal debug timer
 Metro timer500_2 = Metro(500);    // Charger timer
 Metro timer5_1 = Metro(5);    // BMS_Stat *
@@ -119,7 +119,7 @@ FilterOnePole lowpassFilter(LOWPASS, filterFrequency);
 #define OUT1 6    // Ignition is started
 #define OUT2 9    // PRE Charge Contactor
 #define OUT3 10   // HV Drive Contactor
-#define OUT4 11   // Brake Lights
+#define OUT4 11   // Power steering pump 
 #define OUT5 12   // Heater Pump
 #define OUT6 24   // FAN control
 #define OUT7 25   // RPM signal
@@ -165,7 +165,7 @@ int flag=0; //*
 int flag1=0; //*
 
 uint8_t start = 1;
-uint8_t ppDetect = 0;    // Prox pilot pin
+uint8_t ppDetect = 1;    // Prox pilot pin
 uint8_t ignition = 1;    // ignition
 uint8_t dir_FWD = 1;     // Drive Switch is set to forward
 uint8_t dir_REV = 1;     // DRIVE Sitch is to Reverse
@@ -180,7 +180,7 @@ float BMS_avgvolt;
 float BMS_avgtmp; // BMS Battery AVG Temp
 float currentact; // BMS Current
 float BMS_packvoltage;
-float BMS_Volt[84];
+float BMS_Volt[96];
 float BMS_nom;
 float BMS_max;
 float BMS_min;
@@ -204,11 +204,12 @@ int chargerTemp2 = 0;
 int chargerTemp3 = 0;
 int chargerTempCH = 0;
 int chargerHVcurrent = 0;
-int chargercurrent = 0;
+uint8_t PWM_signal = 0;
+uint8_t PWM_sig = 0;
+uint8_t chargercurrent = 0;
 uint8_t chargerStatus;
 int DCDCTemp = 0;
-bool chargerHV1 = false; //charger voltage threshold 1
-bool chargerHV2 = false;  //charger voltage threshold 2
+bool chargerHV = false; //charger voltage threshold
 
 int motorRPM = 0;
 int motorTempPeak = 0;
@@ -254,6 +255,7 @@ uint8_t tempGaugeMin = EEPROM.read(1); // Temp Gauge min PWM
 uint8_t tempGaugeMax = EEPROM.read(2); // Temp Gauge Max PWM
 uint8_t pumpOnTemp = EEPROM.read(3);
 uint8_t fanOnTemp = EEPROM.read(6);
+uint8_t Heater_temp = EEPROM.read(7);
 uint8_t minTorque = EEPROM.read(8);   // Used for creeping feature to be added
 uint16_t chargerstop = EEPROM.read(10) * 255 + EEPROM.read(9); // Maximal charger voltage
 uint8_t torqueIncrement = EEPROM.read(12);                       // used for ramping up torque request
@@ -282,7 +284,8 @@ byte idx_j, idx_k; // index of tps,rpm bins
 int pedal_offset;
 
 const int num_rpm_bins = 21;
-const int tpsbins[21] = {0, 3, 5, 8, 10, 13, 18, 20, 23, 25, 28, 32, 34, 40, 50, 60, 70, 80, 90, 100, 101};
+const int tpsbins[21] = {0, 5, 10, 15, 18, 22, 25, 28, 32, 36, 40, 45, 50, 56, 62, 68, 74, 82, 90, 100, 101};
+// tpsbins[21] = {0, 3, 5, 8, 10, 13, 18, 20, 23, 25, 28, 32, 34, 40, 50, 60, 70, 80, 90, 100, 101};
 
 const int rpmbins[num_rpm_bins] = {
     250, 500, 625, 750, 1000, 1250, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 5500, 6000, 6500, 7000, 7500, 8000, 10000};
@@ -290,79 +293,79 @@ const int rpmbins[num_rpm_bins] = {
 const int pedal_map_one[21][22] = {
     // Normal
     // map 1..
-    /*250*/ {0, 0, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 8, 10},
-    /*500*/ {-10, 0, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 8, 10},
-    /*625*/ {-20, 0, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 8, 10},
-    /*750*/ {-30, 0, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 8, 10},
-    /*1000*/ {-50, 0, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 8, 10},
-    /*1250*/ {-70, 0, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 8, 10},
-    /*1500*/ {-90, 0, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 8, 10},
-    /*2000*/ {-110, 0, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 8, 10},
-    /*2500*/ {-130, 0, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 8, 10},
-    /*3000*/ {-150, 0, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 8, 10},
-    /*3500*/ {-150, 0, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 8, 10},
-    /*4000*/ {-150, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 8, 10},
-    /*4500*/ {-150, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 8, 10},
-    /*5000*/ {-160, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 8, 10},
-    /*5500*/ {-180, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 8, 10},
-    /*6000*/ {-200, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 8, 10},
-    /*6500*/ {-200, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 8, 10},
-    /*7000*/ {-225, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 8, 10},
-    /*7500*/ {-250, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 8, 10},
-    /*8000*/ {-300, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 8, 10},
-    /*10000*/ {-300, 0, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 8, 10},
+    /*250*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*500*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*625*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*750*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*1000*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*1250*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*1500*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*2000*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*2500*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*3000*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*3500*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*4000*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 8, 9, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*4500*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*5000*/ {0, 3, 3, 4, 4, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*5500*/ {0, 3, 3, 4, 4, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*6000*/ {0, 3, 3, 4, 4, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*6500*/ {0, 3, 3, 4, 4, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*7000*/ {0, 3, 3, 4, 4, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*7500*/ {0, 3, 3, 4, 4, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*8000*/ {0, 3, 3, 4, 4, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*10000*/ {0, 3, 3, 4, 4, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
 };
 
 const int pedal_map_two[21][22] = {
-    // Sport
-    // map 3..
-    /*250*/ {0, 0, 3, 6, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 10, 18, 20, 20, 20, 20, 20},
-    /*500*/ {-10, 0, 3, 6, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 10, 14, 20, 20, 20, 20, 20},
-    /*625*/ {-20, 0, 3, 6, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 10, 12, 14, 18, 20, 20, 20},
-    /*750*/ {-30, 0, 3, 6, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 14, 18, 20, 20},
-    /*1000*/ {-50, 0, 3, 6, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 12, 14, 18, 20},
-    /*1250*/ {-70, 0, 3, 6, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 12, 12, 14, 18},
-    /*1500*/ {-90, 0, 3, 6, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 12, 12, 14, 18},
-    /*2000*/ {-110, 0, 3, 4, 5, 5, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 12, 12, 14, 16},
-    /*2500*/ {-130, 0, 3, 4, 5, 5, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 12, 12, 14, 16},
-    /*3000*/ {-150, 0, 3, 4, 5, 5, 6, 7, 8, 8, 8, 8, 8, 8, 10, 10, 10, 12, 12, 14, 16},
-    /*3500*/ {-150, 0, 3, 4, 5, 5, 6, 7, 8, 8, 8, 8, 8, 8, 10, 10, 10, 12, 12, 14, 16},
-    /*4000*/ {-150, 0, 3, 4, 5, 5, 6, 7, 8, 8, 8, 8, 8, 8, 10, 10, 10, 12, 12, 14, 16},
-    /*4500*/ {-150, 0, 3, 4, 5, 5, 6, 7, 8, 8, 8, 8, 8, 8, 10, 10, 10, 12, 12, 14, 16},
-    /*5000*/ {-160, 0, 3, 4, 5, 5, 6, 7, 8, 8, 8, 8, 8, 8, 10, 10, 10, 12, 12, 12, 14},
-    /*5500*/ {-180, 0, 3, 4, 5, 5, 6, 7, 8, 8, 8, 8, 8, 8, 10, 10, 10, 12, 12, 12, 14},
-    /*6000*/ {-200, 0, 3, 4, 5, 5, 6, 7, 8, 8, 8, 8, 8, 8, 10, 10, 10, 12, 12, 12, 14},
-    /*6500*/ {-200, 0, 3, 4, 5, 5, 6, 7, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 12, 14},
-    /*7000*/ {-225, 0, 3, 4, 5, 5, 6, 7, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 12, 12},
-    /*7500*/ {-250, 0, 3, 4, 5, 5, 6, 7, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 12, 12},
-    /*8000*/ {-300, 0, 3, 4, 5, 5, 6, 6, 7, 7, 8, 8, 8, 8, 8, 9, 9, 10, 12, 12, 12},
-    /*10000*/ {-300, 0, 3, 4, 5, 5, 6, 6, 7, 7, 8, 8, 8, 8, 8, 9, 9, 10, 12, 12, 12},
+    // Backup
+    // map 2..
+    /*250*/ {0, 0, 3, 4, 8, 10, 12, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 16},
+    /*500*/ {-60, 0, 3, 4, 8, 10, 12, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 16},
+    /*625*/ {-60, 0, 3, 4, 8, 12, 12, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 16},
+    /*750*/ {-60, 0, 3, 4, 8, 12, 12, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 16},
+    /*1000*/ {-90, 0, 3, 4, 8, 12, 12, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 16},
+    /*1250*/ {-90, 0, 3, 4, 8, 12, 12, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 16},
+    /*1500*/ {-110, 0, 3, 4, 8, 12, 12, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 16},
+    /*2000*/ {-110, 0, 3, 4, 8, 12, 10, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
+    /*2500*/ {-130, 0, 3, 4, 8, 12, 10, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
+    /*3000*/ {-130, 0, 3, 4, 8, 12, 10, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
+    /*3500*/ {-150, 0, 3, 4, 8, 10, 10, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
+    /*4000*/ {-150, 0, 3, 4, 8, 10, 10, 8, 8, 8, 8, 8, 9, 10, 10, 10, 10, 12, 12, 14, 14},
+    /*4500*/ {-150, 0, 3, 4, 6, 8, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 14, 14},
+    /*5000*/ {-160, 0, 3, 4, 5, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 14},
+    /*5500*/ {-160, 0, 3, 4, 5, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
+    /*6000*/ {-160, 0, 3, 4, 5, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
+    /*6500*/ {-160, 0, 3, 4, 5, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
+    /*7000*/ {-160, 0, 3, 4, 5, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
+    /*7500*/ {-160, 0, 3, 4, 5, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
+    /*8000*/ {-160, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
+    /*10000*/ {-160, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
 };
 
 const int pedal_map_three[21][22] = {
     // Sport
     // map 3..
-    /*250*/ {0, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
-    /*500*/ {-10, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
-    /*625*/ {-20, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
-    /*750*/ {-30, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
-    /*1000*/ {-50, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
-    /*1250*/ {-70, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
-    /*1500*/ {-90, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
-    /*2000*/ {-110, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
-    /*2500*/ {-130, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
-    /*3000*/ {-150, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
-    /*3500*/ {-150, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
-    /*4000*/ {-150, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 8, 9, 10, 10, 10, 10, 12, 12, 14, 14},
-    /*4500*/ {-150, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 14, 14},
-    /*5000*/ {-160, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 14},
-    /*5500*/ {-180, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
-    /*6000*/ {-200, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
-    /*6500*/ {-200, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
-    /*7000*/ {-225, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
-    /*7500*/ {-250, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
-    /*8000*/ {-300, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
-    /*10000*/ {-300, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
+    /*250*/ {0, 0, 0, 3, 3, 4, 6, 8, 8, 10, 10, 11, 12, 12, 16, 16, 18, 18, 20, 24, 24},
+    /*500*/ {-60, -30, 0, 3, 4, 5, 6, 6, 8, 9, 9, 11, 12, 12, 16, 16, 18, 18, 20, 24, 24},
+    /*625*/ {-70, -40, 0, 3, 4, 5, 6, 6, 8, 8, 9, 11, 12, 12, 16, 16, 18, 18, 20, 24, 24},
+    /*750*/ {-90, -60, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
+    /*1000*/ {-120, -80, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
+    /*1250*/ {-160, -80, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
+    /*1500*/ {-180, -90, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
+    /*2000*/ {-180, -90, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
+    /*2500*/ {-200, -90, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
+    /*3000*/ {-200, -90, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
+    /*3500*/ {-220, -100, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
+    /*4000*/ {-220, -100, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
+    /*4500*/ {-230, -120, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
+    /*5000*/ {-230, -120, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
+    /*5500*/ {-230, -120, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
+    /*6000*/ {-230, -120, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
+    /*6500*/ {-230, -120, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
+    /*7000*/ {-230, -120, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 11, 12, 14, 16, 18, 18, 20, 24, 24},
+    /*7500*/ {-260, -120, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 11, 11, 12, 14, 16, 18, 20, 22, 22},
+    /*8000*/ {-260, -120, 0, 3, 3, 5, 6, 6, 8, 8, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 22},
+    /*10000*/ {-260, -120, 0, 3, 3, 5, 6, 6, 8, 8, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 22},
 };
 
 void setup()
@@ -534,8 +537,14 @@ else {
       digitalWrite(OUT8, HIGH);
     }
   }
-
-
+//////////////////////////////////////////////////////////////////////////// setup to stop charging when at HV limit 
+  if (chargerHVbattryVolts > chargerstop)  { // if HV is at limit
+      chargerHV = true; 
+    }
+	
+ else if (chargerHVbattryVolts < chargerstop - 2)  { // if HV is some way below limit
+      chargerHV = false; 
+    }	
 
   if ((timer2000_1.check() == 1) && showStats == 1)
   {
@@ -561,6 +570,7 @@ void menu()
     Serial.println("5 - Set Temp Gauge High Value");
     Serial.println("6 - Set Pedal Lo Offset");
     Serial.println("7 - Set Pedal High Offset");
+    Serial.println("8 - Set Heater Temp");
     // Serial.println("8 - Set Regen Tourqe");
     Serial.println("9 - Set Map");
     Serial.println("0 - Set Torque Increment");
@@ -682,6 +692,18 @@ void menu()
     menuLoad = 0;
 
     break;
+
+case '8': {
+int value = Serial.parseInt();
+if (value > 80)
+{
+value = 80;
+}
+Heater_temp = value;
+Serial.print("Heater Set to: ");
+Serial.println(value);
+menuLoad = 0;
+break; }
 
  /* case '8':
   {
@@ -919,7 +941,7 @@ void readPins()
   Heater_pin = digitalRead(ISO_IN5);
   map3 = digitalRead(ISO_IN6);
   ignition = digitalRead(ISO_IN7);
-  ppDetect = !digitalRead(ISO_IN8);
+  ppDetect = digitalRead(ISO_IN8);
 
  }
 
@@ -1147,8 +1169,37 @@ Heatertemp = (Heatertemp1 + Heatertemp2) / 2;
 
 void canRX_38A(const CAN_message_t &msg)
 {
- // chargerHVbattryVolts = msg.buf[0] * 2; // Charger HV Battery Voltage
-  chargercurrent = msg.buf[3];
+PWM_signal = msg.buf[3]; // pwm report
+if (PWM_signal >= 26){
+PWM_sig = 26;
+}
+else if (PWM_signal < 10){
+PWM_sig = 10;
+}
+else {
+PWM_sig = PWM_signal;   
+}
+
+chargercurrent = PWM_sig*10/2.7; // pwm report[%] * 10 / by 3 to get DC amps
+/*
+0x38ah 8bytes Charger status
+  B0 = Temperature    Raises together with other temperatures, but with +5deg offset
+  B1 = Temperature    (starts at -40degC, +1degC/bit)
+  B2 = DC-bus voltage     (9B=310V -> 2V/bit)
+  B3 = PWM-signal from EVSE   (h19=25% -> 1%/bit)
+  B4 = Status
+    bit0(LSB) = 
+`   bit1    =
+    bit2    = Wait for mains voltage 
+    bit3      = Ready for charging
+    bit4      =
+    bit5      =
+    bit6    = 
+    bit7(MSB) = 
+  B5 = 00
+  B6 = 00
+  B7 = 00 
+ */  
 }
 
 void canRX_732(const CAN_message_t &msg)
@@ -1168,12 +1219,11 @@ void canRX_733(const CAN_message_t &msg)
 
 void EvseStart()
 {
-
- if (timer500_2.check() == 1)
-  {
     chargerstopLoByte = lowByte(chargerstop*10);
     chargerstopHibyte = highByte(chargerstop*10);
 
+ if (timer500_2.check() == 1)
+  {
     msg.id = 0x286;
       msg.len = 8;
       msg.buf[0] = 0x10; //voltage 360V
@@ -1185,7 +1235,7 @@ void EvseStart()
       msg.buf[2] = 0x00;        
       }
       else  { //any other case
-      msg.buf[2] = 0x78;        
+      msg.buf[2] = chargercurrent; // Current byte 0x78 = 120; 12A       
       }
       msg.buf[3] = 0x37;
       msg.buf[4] = 0x0;
@@ -1193,22 +1243,36 @@ void EvseStart()
       msg.buf[6] = 0x0A;
       msg.buf[7] = 0x0;
     Can2.write(msg);
- //  Serial.println(map(chargercurrent,13,27,6,12)*10); 
-// Eltek charger commands
+ /*  Serial.println(map(chargercurrent,13,27,6,12)*10); 
 
+0x38a byte3 PWM-signal from EVSE   (h19=25% -> 1%/bit)
+chargercurrent
+Current (A)	Duty cycle (%)
+6	           10
+12	         20
+18	         30
+24	         40
+30	         50
+
+Eltek charger commands
+*/ 
+}
+
+  if (timer100_4.check() == 1)
+  {   
     msg.id = 0x2FF;
       msg.len = 8;
       msg.buf[0] = 0x01; 
       msg.buf[1] = 0xE8;
       msg.buf[2] = 0x03;        
       msg.buf[3] = chargerstopLoByte; // Voltage byte h
-      msg.buf[4] = chargerstopHibyte; // Voltage byte h
-      msg.buf[5] = 0x78; //current byte
+      msg.buf[4] = chargerstopHibyte; // Voltage byte l
+      msg.buf[5] = chargercurrent;   // Current byte 0x78 = 120; 12A 
       msg.buf[6] = 0x00;
       msg.buf[7] = 0x00;
     Can2.write(msg);
+  }
 
-}
 }
 
 void inverterComms()
@@ -1246,7 +1310,7 @@ void inverterComms()
       curentTorque = torqueRequest;
     }
 
-   if (active_map == 1 && VCUstatus == 4) // Regen in map1 is to be off
+   if (active_map == 1 && VCUstatus == 4) // Regen in map1 is off
     {
         regenState = 0;
         regenTarget = 0;
@@ -1274,7 +1338,7 @@ void inverterComms()
     {
       if (regenTarget > regenRequest) // increment Regen off
       {
-        regenRequest += 20; 
+        regenRequest += 30; 
         torqueRequest = regenRequest;
         // Serial.println("Regen Dec.");
       }
@@ -1410,11 +1474,11 @@ else {
     msg.buf[0] = 0x00; // Heater pin is off
 }
     msg.buf[1] = 0x50; // byte1 20 to 50 works
-if (Heatertemp >= 55) {
-    msg.buf[2] = 0x00; //Heater off when at 55deg   
+if (Heatertemp >= Heater_temp) {
+    msg.buf[2] = 0x00; //Heater off when at 65deg   
 }    
-else if (Heatertemp > 50) {
-    msg.buf[2] = 0x32; //Heater at 1/2 when at 50deg   
+else if (Heatertemp > (Heater_temp - 5)) {
+    msg.buf[2] = 0x32; //Heater at 1/2 when at 60deg   
 }    
 else {
     msg.buf[2] = 0xA2; //Heater on at full power (dec/10)
@@ -1530,10 +1594,12 @@ void showInfo()
   Serial.print(active_map);
   Serial.print("  BMS Status: ");
   Serial.print(BMS_Status);
-  Serial.print(" Charger Status: ");
-  Serial.print(chargerStatus, HEX);
-  Serial.print(" BMS Current: ");
-  Serial.print(currentact);
+  Serial.print(" Charger Current: ");
+  Serial.print(chargercurrent*0.1);
+  Serial.print(" PWM_signal: ");
+  Serial.print(PWM_signal);
+  Serial.print(" Calculated signal: ");
+  Serial.print(PWM_sig);
   Serial.print(" BMS HV: ");
   Serial.print(BMS_packvoltage);
   Serial.print(" BMS TEMP: ");
@@ -1556,6 +1622,8 @@ void showInfo()
   Serial.println(chargerACvolts);
   Serial.print("Heater Temperature: ");
   Serial.print(Heatertemp);
+  Serial.print("Set Heater Temperature: ");
+  Serial.print(Heater_temp);
   Serial.print("  Heater Status: ");
   Serial.print(Heater_pin);
   Serial.print("  Charger Stop Voltage: ");
@@ -1600,9 +1668,10 @@ void loadDefault() // Load the defaul values
 {
   tempGaugeMin = 18;  // Temp Gauge min PWM
   tempGaugeMax = 128; // Temp Gauge Max PWM
-  chargerstop = 340; // stop charger
+  chargerstop = 388; // stop charger
   pumpOnTemp = 30;
   fanOnTemp = 30;
+  Heater_temp = 65; // default heater temp
   maxTorque = 2000;      // Not used curently
   minTorque = 0;        // Not used  curently
   tpslowOffset = 1700;  // Value when i just put my foot on the pedal and push a bit when reading the offset
@@ -1621,6 +1690,7 @@ void saveVarsToEEPROM() // Save Values to EEPROM
   EEPROM.update(2, tempGaugeMax);
   EEPROM.update(3, pumpOnTemp);
   EEPROM.update(6, fanOnTemp);
+  EEPROM.update(7, Heater_temp);
   EEPROM.update(8, minTorque);
   EEPROM.update(9, lowByte(chargerstop));
   EEPROM.update(10, highByte(chargerstop));
@@ -1669,7 +1739,7 @@ void stateHandler()
   digitalWrite(LEDpin, LOW);
     }
 
-    if ((digitalRead(ISO_IN8) == HIGH)) //PP pin
+    if ((digitalRead(ISO_IN8) == LOW) && (chargerHV == false)) //PP pin active
     {
       if (VCUstatusChangeCounter > VCUstatusChangeThreshold)
       {
@@ -1682,6 +1752,7 @@ void stateHandler()
       }
       else
       {
+		BMS_Status = 1;  
         VCUstatusChangeCounter++;
       }
     }
@@ -1699,6 +1770,7 @@ void stateHandler()
       }
       else
       {
+		BMS_Status = 1; 		  
         VCUstatusChangeCounter++;
       }
     }
@@ -1711,14 +1783,11 @@ void stateHandler()
     {
       digitalWrite(OUT12, LOW); // Turn off the reversing lights
     }
-    if (digitalRead(OUT4) == HIGH)
-    {
-      digitalWrite(OUT4, LOW); // Turn off the Brake lights
-    }
     if (digitalRead(OUT1) == LOW) // Check if Neg Contactor is off then start the sequence
     {
 
       digitalWrite(OUT1, HIGH); // Negative Contactor
+      digitalWrite(OUT4, HIGH); // Power steering ignition
 
       Serial.println("Negative On!...");
       pretimer1 = millis();
@@ -1727,9 +1796,10 @@ void stateHandler()
     {
       if ((digitalRead(OUT2) == LOW) && (digitalRead(OUT3) == LOW))
       {
-        digitalWrite(OUT11, HIGH); // Voltage light during during precharge on
+        digitalWrite(OUT11, HIGH); // Voltage light on during during precharge
         digitalWrite(OUT10, HIGH); // Error light on during precharge    
         digitalWrite(OUT2, HIGH);
+
         Serial.println("PreCharge On!...");
         pretimer1 = millis();
         pretimer2 = millis();
@@ -1739,8 +1809,8 @@ void stateHandler()
     {
        if ((motorHVbatteryVolts >= chargerHVbattryVolts - 5.0) && (digitalRead(OUT3) == LOW)) // Check that the preCharge has finished
       {
-        digitalWrite(OUT11, LOW); // Voltage light during during precharge on
-        digitalWrite(OUT10, LOW); // Error light on during precharge    
+        digitalWrite(OUT11, LOW); // Voltage light off during during precharge
+        digitalWrite(OUT10, LOW); // Error light off during precharge    
         digitalWrite(OUT3, HIGH); // Turn on drive Contactor
         Serial.println("Main On!...");
         pretimer1 = millis();
@@ -1750,8 +1820,8 @@ void stateHandler()
     if ((pretimer1 + 500 < millis()) && (digitalRead(OUT2) == HIGH) && (digitalRead(OUT3) == HIGH))
     {
         digitalWrite(OUT2, LOW);
-        digitalWrite(OUT11, HIGH); // Voltage light during during precharge on
-        digitalWrite(OUT10, LOW); // Error light on during precharge    
+        digitalWrite(OUT11, LOW); // Voltage light during during precharge on
+        digitalWrite(OUT10, HIGH); // Error light off during precharge    
       Serial.println("PreCharge OFF!...");
       digitalWrite(OUT8, HIGH); // DC-DC Enable on
       Serial.println("DC-DC Enabled...");
@@ -1780,8 +1850,8 @@ void stateHandler()
     {
       if (preChargeRiseTime < 500)
       {
-        digitalWrite(OUT11, HIGH); // Voltage light during during precharge on
-        digitalWrite(OUT10, LOW); // Error light on during precharge            
+        digitalWrite(OUT11, LOW); // Voltage light during during precharge on
+        digitalWrite(OUT10, HIGH); // Error light off during precharge            
       }
       if (preChargeRiseTime >= 500)
       {
@@ -1862,11 +1932,10 @@ BMS_Status = 2;
   {
     if ((dir_FWD == 1) && (dir_REV == 1))
     {
-
       if (VCUstatusChangeCounter > VCUstatusChangeThreshold)
       {
         VCUstatusChangeCounter = 0;
-        digitalWrite(OUT12, LOW); // Turn off Rev Lights
+
         VCUstatus = 3;
       }
       else
@@ -1883,9 +1952,27 @@ BMS_Status = 2;
 
     readPedal();
     BMS_keyOn = 1; // Key on for BMS
-  digitalWrite(OUT11, LOW); // Voltage light during during precharge off
-  digitalWrite(OUT10, LOW); // Error light off during precharge  
-    digitalWrite(OUT12, LOW); // Turn off Rev Lights
+
+if (( chargerHVbattryVolts <  316) && (chargerHVbattryVolts >  288) ) {
+  digitalWrite(OUT11, LOW); // Voltage light 
+  digitalWrite(OUT10, HIGH); // Error light on if HV too low   
+}
+
+else if ( chargerHVbattryVolts <=  288)    {
+  inverterFunction = 0x00;      // disable the inverter
+        VCUstatusChangeCounter = 0;
+        VCUstatus = 7;
+}
+
+else {
+  digitalWrite(OUT11, LOW); // Voltage light
+  digitalWrite(OUT10, LOW); // Error light
+}
+
+  if (digitalRead(OUT4) == LOW)     {
+      digitalWrite(OUT4, HIGH); // Turn on the power steering
+    }
+
     // Pedal Map Handler
 
     byte j = 0; // index of tps
@@ -1948,7 +2035,6 @@ BMS_Status = 2;
         regenTarget = 0;
         regenRequest = 0;
         brakeDelay = 0;
-        digitalWrite(OUT4, LOW); // Brake Lights off
       }
     }
     else if (pedal_offset > 1 && regenState != 2)
@@ -1965,14 +2051,14 @@ BMS_Status = 2;
 
       inverterFunction = 0x03;
       regenState = 1;
-      regenTarget = pedal_offset * -1; // previously +2 for OEM direction
+      regenTarget = pedal_offset * -1.33; // previously +2 for OEM direction
       if (brake_pedal == 1 && brakeDelay == 0)
       {
         brakeDelay = millis();
       }
       if (brake_pedal == 1 && brakeDelay + 1000 < millis() && regenRequest < -9) 
       {
-        digitalWrite(OUT4, HIGH);
+
         brakeDelay = 0;
       }
     }
@@ -1997,11 +2083,12 @@ BMS_Status = 2;
       regenRequest = 0;
       regenTimer = 0;
       brakeDelay = 0;
-      digitalWrite(OUT4, LOW); // Brake Lights off
+
     }
 //Speedo();  // speedo 
 inverterComms();
 HeaterComms();
+
 
    if (digitalRead(ISO_IN5) == LOW)  {
   digitalWrite(OUT5, HIGH);
@@ -2043,9 +2130,8 @@ BMS_Status = 2;
       {
         VCUstatusChangeCounter = 0;
         VCUstatus = 3;
-        digitalWrite(OUT4, LOW);  // Turn off Barke Lights
-        digitalWrite(OUT12, LOW); // Turn off Rev Lights
-      }
+
+       }
       else
       {
         VCUstatusChangeCounter++;
@@ -2059,7 +2145,7 @@ BMS_Status = 2;
       {
         VCUstatusChangeCounter = 0;
         VCUstatus = 4;
-        digitalWrite(OUT12, LOW); // Turn off Rev Lights
+
       }
       else
       {
@@ -2069,9 +2155,26 @@ BMS_Status = 2;
 
     readPedal();
     BMS_keyOn = 1;             // enable the inverter
-    digitalWrite(OUT11, LOW); // Voltage light during during precharge off
-    digitalWrite(OUT10, LOW); // Error light off during precharge  
-    digitalWrite(OUT12, HIGH); // Turn on the reversing lights
+
+if (( chargerHVbattryVolts <  316) && (chargerHVbattryVolts >  288) ) {
+  digitalWrite(OUT11, LOW); // Voltage light 
+  digitalWrite(OUT10, HIGH); // Error light on if HV too low   
+}
+
+else if ( chargerHVbattryVolts <=  288)    {
+  inverterFunction = 0x00;      // disable the inverter
+        VCUstatusChangeCounter = 0;
+        VCUstatus = 7;
+}
+
+else {
+  digitalWrite(OUT11, LOW); // Voltage light
+  digitalWrite(OUT10, LOW); // Error light
+}
+
+  if (digitalRead(OUT4) == LOW)     {
+      digitalWrite(OUT4, HIGH); // Turn on the power steering ignition
+    }
 
       if (fanState == 0)
       {
@@ -2081,7 +2184,7 @@ BMS_Status = 2;
 
     if (throttlePosition > 5)
     {
-      torqueRequest = throttlePosition * 8; // lets make the pedal less responsive *6
+      torqueRequest = throttlePosition * 16; // lets make the pedal less responsive * 16
       inverterFunction = 0x03;
       if (motorRPM < -2000)
       {
@@ -2225,6 +2328,10 @@ else {
   digitalWrite(OUT5, LOW);
 }
 
+  if (digitalRead(OUT4) == HIGH)     {
+      digitalWrite(OUT4, LOW); // Turn off the power steering ignition
+    }
+
 if (chargerTempCH > fanOnTemp)
     {
       if (fanState == 0)
@@ -2257,7 +2364,7 @@ EvseStart(); //start charging if precharge is done and BMS is in correct state
     }
 	
 	      // Check for ISO_IN8 PP inactivity
-      if (digitalRead(ISO_IN8) == LOW) 
+      if ((digitalRead(ISO_IN8) == HIGH) || (chargerHV == true)) // setup to stop charging when at HV limit 
       {
      if (VCUstatusChangeCounter > VCUstatusChangeThreshold)
       {
@@ -2278,7 +2385,10 @@ EvseStart(); //start charging if precharge is done and BMS is in correct state
   {
     BMS_keyOn = 0;
     inverterFunction = 0x00;
-    digitalWrite(OUT11, HIGH); // Voltage light during during precharge on
+    if (timer1000_1.check() == 1)
+        {
+          digitalWrite(OUT11, !digitalRead(OUT11)); // Flash the Green LED
+        }
     digitalWrite(OUT10, HIGH); // Error light on during precharge    
     Serial.println("ERROR !!!");
 
