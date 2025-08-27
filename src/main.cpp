@@ -49,6 +49,7 @@ Error 5
 
 signed long loopTime = 0;
 
+void canSniff(const CAN_message_t &msg);
 void canRX_289(const CAN_message_t &msg); // Inverter RPM, Battery and Torque
 void canRX_299(const CAN_message_t &msg); // Inverter Temps
 void canRX_377(const CAN_message_t &msg); // Outlander Charger Low voltage stats
@@ -57,23 +58,25 @@ void canRX_389(const CAN_message_t &msg); // Outlander Charger HV stats
 void canRX_398(const CAN_message_t &msg); // Outlander Heater stats
 void canRX_732(const CAN_message_t &msg); // Inverter Current
 void canRX_733(const CAN_message_t &msg); // Inverter Temps
-void bmsComms();                          // Comms to the BMS - Set Key on
 
+void bmsComms();                          // Comms to the BMS - Set Key on
 void dogFood();
-// void BMS_Stat(); //*
-void BMS_Read(); //*
+void tacho();
+void BMS_Read(); 
 void menu();
 void readPins();
 void readPedal();
 void inverterComms();
-void EvseStart(); //*
-void tempCheck();
+void EvseStart();
+void PumpCheck(); 
+void TempCheck();
 void Speedo();
 void showInfo();
 void loadDefault();
 void saveVarsToEEPROM();
 void stateHandler();
 void HeaterComms();
+void turtle_mode();
 
 // Timer for BMS heartbeat
 IntervalTimer BMStimer;
@@ -85,8 +88,9 @@ Metro timer50_1 = Metro(30);     // inverter timer
 Metro timer50_2 = Metro(50);     // De-bounce check
 Metro timer100_1 = Metro(100);   // 2nd inverter timer
 Metro timer100_2 = Metro(96);    // longer Debounce
-Metro timer100_3 = Metro(105);   // Temp handler
+Metro timer100_3 = Metro(105);   // pump handler
 Metro timer100_4 = Metro(102);   // Speedo handler
+Metro timer100_5 = Metro(98);    // temp handler 
 Metro timer500_1 = Metro(50);    // pedal debug timer
 Metro timer500_2 = Metro(500);    // Charger timer
 Metro timer5_1 = Metro(5);    // BMS_Stat *
@@ -210,7 +214,7 @@ uint8_t chargercurrent = 0;
 uint8_t chargerStatus;
 int DCDCTemp = 0;
 bool chargerHV = false; //charger voltage threshold
-
+bool turtlemode = false; //turtle mode because of low voltage
 int motorRPM = 0;
 int motorTempPeak = 0;
 int motorTemp1 = 0;
@@ -270,6 +274,22 @@ uint8_t setTpsHigh = 0;
 uint8_t active_map = 3; // Active Pedal map
 uint8_t map3;           // Sport MAp
 
+//Tacho constants
+const int tachoPin = OUT9;     // Pin used for tacho signal
+const int teethCount = 60;
+const int missingTeeth = 2;
+
+const float rpm = 800.0;
+const float revPerSec = rpm / 60.0;
+const float revPeriodMs = 1000.0 / revPerSec; // Period of one revolution in ms
+const float toothPeriodMs = revPeriodMs / teethCount; // Time per tooth
+
+volatile int currentTooth = 0;
+bool canMessageReceived = false;
+
+//Metro timer
+Metro tachoMetro(toothPeriodMs); // timer for tacho
+
 // Define constants
 // speed = wheelsRPM * tireD * PI * 60 / 1000 Km/h
 const float tireD = 0.596; //15in wheels
@@ -293,79 +313,79 @@ const int rpmbins[num_rpm_bins] = {
 const int pedal_map_one[21][22] = {
     // Normal
     // map 1..
-    /*250*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
-    /*500*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
-    /*625*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
-    /*750*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
-    /*1000*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
-    /*1250*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
-    /*1500*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
-    /*2000*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
-    /*2500*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
-    /*3000*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
-    /*3500*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
-    /*4000*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 8, 9, 10, 10, 12, 12, 14, 16, 18, 20},
-    /*4500*/ {0, 3, 3, 4, 4, 8, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
-    /*5000*/ {0, 3, 3, 4, 4, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
-    /*5500*/ {0, 3, 3, 4, 4, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
-    /*6000*/ {0, 3, 3, 4, 4, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
-    /*6500*/ {0, 3, 3, 4, 4, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
-    /*7000*/ {0, 3, 3, 4, 4, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
-    /*7500*/ {0, 3, 3, 4, 4, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
-    /*8000*/ {0, 3, 3, 4, 4, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
-    /*10000*/ {0, 3, 3, 4, 4, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*250*/ {0, 2, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 18},
+    /*500*/ {0, 2, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*625*/ {0, 2, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*750*/ {0, 2, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*1000*/ {0, 2, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*1250*/ {0, 2, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*1500*/ {0, 2, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*2000*/ {0, 2, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*2500*/ {0, 2, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*3000*/ {0, 2, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*3500*/ {0, 2, 3, 4, 4, 8, 8, 8, 8, 8, 8, 9, 9, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*4000*/ {0, 2, 3, 4, 4, 8, 8, 8, 8, 8, 8, 8, 9, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*4500*/ {0, 2, 3, 4, 4, 8, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*5000*/ {0, 2, 3, 4, 4, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*5500*/ {0, 2, 3, 4, 4, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*6000*/ {0, 2, 3, 4, 4, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*6500*/ {0, 2, 3, 4, 4, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*7000*/ {0, 2, 3, 4, 4, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*7500*/ {0, 2, 3, 4, 4, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 20},
+    /*8000*/ {0, 2, 3, 4, 4, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 18},
+    /*10000*/ {0, 2, 3, 4, 4, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 12, 12, 14, 16, 18, 18},
 };
 
 const int pedal_map_two[21][22] = {
     // Backup
     // map 2..
-    /*250*/ {0, 0, 3, 4, 8, 10, 12, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 16},
-    /*500*/ {-60, 0, 3, 4, 8, 10, 12, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 16},
-    /*625*/ {-60, 0, 3, 4, 8, 12, 12, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 16},
-    /*750*/ {-60, 0, 3, 4, 8, 12, 12, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 16},
-    /*1000*/ {-90, 0, 3, 4, 8, 12, 12, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 16},
-    /*1250*/ {-90, 0, 3, 4, 8, 12, 12, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 16},
-    /*1500*/ {-110, 0, 3, 4, 8, 12, 12, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 16},
-    /*2000*/ {-110, 0, 3, 4, 8, 12, 10, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
-    /*2500*/ {-130, 0, 3, 4, 8, 12, 10, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
-    /*3000*/ {-130, 0, 3, 4, 8, 12, 10, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
-    /*3500*/ {-150, 0, 3, 4, 8, 10, 10, 8, 8, 8, 8, 9, 9, 10, 10, 10, 10, 12, 12, 14, 14},
-    /*4000*/ {-150, 0, 3, 4, 8, 10, 10, 8, 8, 8, 8, 8, 9, 10, 10, 10, 10, 12, 12, 14, 14},
-    /*4500*/ {-150, 0, 3, 4, 6, 8, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 14, 14},
-    /*5000*/ {-160, 0, 3, 4, 5, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 14},
-    /*5500*/ {-160, 0, 3, 4, 5, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
-    /*6000*/ {-160, 0, 3, 4, 5, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
-    /*6500*/ {-160, 0, 3, 4, 5, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
-    /*7000*/ {-160, 0, 3, 4, 5, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
-    /*7500*/ {-160, 0, 3, 4, 5, 6, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
-    /*8000*/ {-160, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
-    /*10000*/ {-160, 0, 3, 4, 5, 5, 8, 8, 8, 8, 8, 8, 8, 10, 10, 10, 10, 12, 12, 12, 12},
+    /*250*/ {0, 0, 2, 3, 4, 4, 4, 4, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8},
+    /*500*/ {0, 0, 2, 3, 4, 4, 4, 4, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8},
+    /*625*/ {0, 0, 2, 3, 4, 4, 4, 4, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8},
+    /*750*/ {0, 0, 2, 3, 4, 4, 4, 4, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8},
+    /*1000*/ {0, 0, 2, 3, 4, 4, 4, 4, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8},
+    /*1250*/ {0, 0, 2, 3, 4, 4, 4, 4, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8},
+    /*1500*/ {0, 0, 2, 3, 4, 4, 4, 4, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8},
+    /*2000*/ {0, 0, 2, 3, 4, 4, 4, 4, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8},
+    /*2500*/ {0, 0, 2, 3, 4, 4, 4, 4, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8},
+    /*3000*/ {0, 0, 2, 4, 4, 4, 4, 4, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8},
+    /*3500*/ {0, 0, 2, 4, 4, 4, 4, 4, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8},
+    /*4000*/ {0, 0, 2, 4, 4, 4, 4, 4, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8},
+    /*4500*/ {0, 0, 2, 4, 4, 4, 4, 4, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8},
+    /*5000*/ {0, 0, 2, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8},
+    /*5500*/ {0, 0, 2, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8},
+    /*6000*/ {0, 0, 2, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8},
+    /*6500*/ {0, 0, 2, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8},
+    /*7000*/ {0, 0, 2, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8},
+    /*7500*/ {0, 0, 2, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8},
+    /*8000*/ {0, 0, 2, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8},
+    /*10000*/ {0, 0, 2, 4, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 8, 8},
 };
 
 const int pedal_map_three[21][22] = {
     // Sport
     // map 3..
-    /*250*/ {0, 0, 0, 3, 3, 4, 6, 8, 8, 10, 10, 11, 12, 12, 16, 16, 18, 18, 20, 24, 24},
-    /*500*/ {-60, -30, 0, 3, 4, 5, 6, 6, 8, 9, 9, 11, 12, 12, 16, 16, 18, 18, 20, 24, 24},
-    /*625*/ {-70, -40, 0, 3, 4, 5, 6, 6, 8, 8, 9, 11, 12, 12, 16, 16, 18, 18, 20, 24, 24},
-    /*750*/ {-90, -60, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
-    /*1000*/ {-120, -80, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
-    /*1250*/ {-160, -80, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
-    /*1500*/ {-180, -90, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
-    /*2000*/ {-180, -90, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
-    /*2500*/ {-200, -90, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
-    /*3000*/ {-200, -90, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
-    /*3500*/ {-220, -100, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
-    /*4000*/ {-220, -100, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
-    /*4500*/ {-230, -120, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
-    /*5000*/ {-230, -120, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
-    /*5500*/ {-230, -120, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
-    /*6000*/ {-230, -120, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
-    /*6500*/ {-230, -120, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 12, 12, 14, 16, 18, 18, 20, 24, 24},
-    /*7000*/ {-230, -120, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 11, 12, 14, 16, 18, 18, 20, 24, 24},
-    /*7500*/ {-260, -120, 0, 3, 3, 5, 6, 6, 8, 8, 9, 10, 11, 11, 12, 14, 16, 18, 20, 22, 22},
-    /*8000*/ {-260, -120, 0, 3, 3, 5, 6, 6, 8, 8, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 22},
-    /*10000*/ {-260, -120, 0, 3, 3, 5, 6, 6, 8, 8, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 22},
+    /*250*/ {0, 0, 0, 2, 3, 4, 4, 6, 6, 8, 8, 10, 10, 12, 12, 14, 14, 16, 16, 18, 18},
+    /*500*/ {-60, -30, 0, 2, 3, 4, 4, 6, 6, 8, 8, 10, 10, 12, 12, 14, 14, 16, 16, 20, 20},
+    /*625*/ {-70, -40, 0, 2, 3, 4, 4, 6, 6, 8, 8, 10, 10, 12, 12, 14, 14, 16, 16, 20, 20},
+    /*750*/ {-90, -60, 0, 2, 3, 4, 4, 6, 6, 8, 8, 10, 10, 12, 12, 14, 14, 16, 16, 20, 20},
+    /*1000*/ {-120, -80, 0, 2, 3, 4, 4, 6, 6, 8, 8, 10, 10, 12, 12, 14, 14, 16, 16, 20, 20},
+    /*1250*/ {-160, -80, 0, 2, 3, 4, 4, 6, 6, 8, 8, 10, 10, 12, 12, 14, 14, 16, 16, 20, 20},
+    /*1500*/ {-180, -90, 0, 2, 3, 4, 4, 6, 6, 8, 8, 10, 10, 12, 12, 14, 14, 16, 16, 20, 20},
+    /*2000*/ {-180, -90, 0, 2, 3, 4, 4, 6, 6, 8, 8, 10, 10, 12, 12, 14, 14, 16, 16, 20, 20},
+    /*2500*/ {-200, -90, 0, 2, 3, 4, 4, 6, 6, 8, 8, 10, 10, 12, 12, 14, 14, 16, 16, 20, 20},
+    /*3000*/ {-200, -90, 0, 2, 3, 4, 4, 6, 6, 8, 8, 10, 10, 12, 12, 14, 14, 16, 16, 20, 20},
+    /*3500*/ {-220, -100, 0, 2, 3, 4, 4, 6, 6, 8, 8, 10, 10, 12, 12, 14, 14, 16, 16, 20, 20},
+    /*4000*/ {-220, -100, 0, 2, 3, 4, 4, 6, 6, 8, 8, 10, 10, 12, 12, 14, 14, 16, 16, 20, 20},
+    /*4500*/ {-230, -120, 0, 2, 3, 4, 4, 6, 6, 8, 8, 10, 10, 12, 12, 14, 14, 16, 16, 20, 20},
+    /*5000*/ {-230, -120, 0, 2, 3, 4, 4, 6, 6, 8, 8, 10, 10, 12, 12, 14, 14, 16, 16, 20, 20},
+    /*5500*/ {-230, -120, 0, 2, 3, 4, 4, 6, 6, 8, 8, 10, 10, 12, 12, 14, 14, 16, 16, 20, 20},
+    /*6000*/ {-230, -120, 0, 2, 3, 4, 4, 6, 6, 8, 8, 10, 10, 12, 12, 14, 14, 16, 16, 20, 20},
+    /*6500*/ {-230, -120, 0, 2, 3, 4, 4, 6, 6, 8, 8, 10, 10, 12, 12, 14, 14, 16, 16, 20, 20},
+    /*7000*/ {-230, -120, 0, 2, 3, 4, 4, 6, 6, 8, 8, 10, 10, 12, 12, 14, 14, 16, 16, 18, 18},
+    /*7500*/ {-260, -120, 0, 2, 3, 4, 4, 6, 6, 8, 8, 10, 10, 11, 12, 14, 14, 16, 16, 18, 18},
+    /*8000*/ {-260, -120, 0, 2, 3, 4, 4, 6, 6, 8, 8, 10, 10, 11, 12, 14, 14, 16, 16, 16, 16},
+    /*10000*/ {-260, -120, 0, 2, 3, 4, 4, 6, 6, 8, 8, 10, 10, 11, 12, 14, 14, 16, 16, 16, 16},
 };
 
 void setup()
@@ -432,11 +452,13 @@ void setup()
   pinMode(OUT6, OUTPUT);   // Fan
   pinMode(OUT7, OUTPUT);   // No conection
   pinMode(OUT8, OUTPUT);   // DC-DC Enable
-  pinMode(OUT9, OUTPUT);   // Temp Gauge
-  pinMode(OUT10, OUTPUT);  // Dash Red LED
-  pinMode(OUT11, OUTPUT);  // Dash Green LED
+  //pinMode(OUT9, OUTPUT);   // Temp Gauge
+  pinMode(OUT10, OUTPUT);  // Dash Voltage LED
+  pinMode(OUT11, OUTPUT);  // Dash Error LED
   pinMode(OUT12, OUTPUT);  // Rev Lights
   pinMode(LEDpin, OUTPUT); // Builtin LED
+  pinMode(tachoPin, OUTPUT); // Temp Gauge
+
 
   // Setup Inputs
   pinMode(ISO_IN1, INPUT); // FWD
@@ -447,6 +469,7 @@ void setup()
   pinMode(ISO_IN6, INPUT); // Map 1 
   pinMode(ISO_IN7, INPUT); // IGN
   pinMode(ISO_IN8, INPUT); // PP Detect
+ // pinMode(enablePin, INPUT);
 
   pinMode(POT_A, INPUT); // Throtle Pot A
   pinMode(POT_B, INPUT); // Throtle Pot B
@@ -461,10 +484,11 @@ void setup()
   digitalWrite(OUT7, LOW);
   digitalWrite(OUT8, LOW);
   digitalWrite(OUT9, LOW);
-  digitalWrite(OUT10, HIGH);
-  digitalWrite(OUT11, LOW);
+  digitalWrite(OUT10, HIGH); //Voltage LED
+  digitalWrite(OUT11, LOW); //Error LED
   digitalWrite(OUT12, LOW);
   digitalWrite(LEDpin, HIGH);
+  digitalWrite(tachoPin, LOW);
 
   // Watch Dog setup
   WDT_timings_t config;
@@ -491,9 +515,9 @@ void loop()
 
   Can2.events();
 
-  tempCheck();
   stateHandler(); 
   readPins(); 
+  turtle_mode();
 
   if (pedalDebug == 1)
   {
@@ -931,6 +955,25 @@ break; }
   }
 }
 
+void tacho() {
+  if (tachoMetro.check()) {
+ // if ((VCUstatus == 3) && (canMessageReceived == true)) {
+    if (currentTooth < (teethCount - missingTeeth)) {
+      digitalWrite(tachoPin, HIGH);
+      delayMicroseconds(100); // Pulse width ~100us
+      digitalWrite(tachoPin, LOW);
+    }
+    // else: missing tooth region, no pulse
+
+    currentTooth++;
+    if (currentTooth >= teethCount) {
+      currentTooth = 0;
+     // canMessageReceived = false; // Reset for next revolution
+    }
+  }
+}
+
+
 void readPins()
 {
 
@@ -1030,7 +1073,11 @@ void dogFood()
 }
 
 // CAN Functions
-
+void canSniff(const CAN_message_t &msg) {
+  if (msg.id == 0x289) {
+    canMessageReceived = true;// if motor report is online
+  }
+}
 
 void canRX_289(const CAN_message_t &msg)
 {
@@ -1038,6 +1085,7 @@ void canRX_289(const CAN_message_t &msg)
   motorRPM = (msg.buf[2] * 256 + msg.buf[3] - 20000);               // 289_RrRPM,Rear RPM,220289,C*256+D-20000,-10000,10000,RPM,
   motorRPM = motorRPM * -1;  //Changing direction of RPM reading
   motorHVbatteryVolts = (msg.buf[4] * 256 + msg.buf[5]);            // Inverter HV
+
 }
 
 void canRX_299(const CAN_message_t &msg)
@@ -1422,6 +1470,16 @@ void inverterComms()
   }
 }
 
+void turtle_mode() {
+if (turtlemode == true) { // put the car in turtle mode
+  active_map = 2;
+  if (timer1000_1.check() == 1)
+  {
+    digitalWrite(OUT11, !digitalRead(OUT11)); // Flash the Error LED
+  }  
+}
+}
+
 void BMS_Read()
 {
   if (timer10_1.check() == 1)
@@ -1519,17 +1577,15 @@ void bmsComms()
     Can2.write(msg);
 }
 
-void tempCheck()
-{
+void PumpCheck() {
   if (timer100_3.check() == 1)
   {
-
     if (Heatertemp > pumpOnTemp) // Temp Handling
     {
-
       if (pumpState == 0)
       {
         digitalWrite(OUT5, HIGH);
+        Serial.println("PUMP ON");  
         pumpState = 1;
       }
     }
@@ -1538,33 +1594,39 @@ void tempCheck()
         if (pumpState == 1)
         {
           digitalWrite(OUT5, LOW);
+          Serial.println("PUMP OFF"); 
           pumpState = 0;
         }
       }
+       }
+}
 
-    if ((DCDCTemp || chargerTempCH || avgInverterTemp || avgMotorTemp) > fanOnTemp)
+void TempCheck() {
+  if (timer100_5.check() == 1)
+  {
+
+    if (DCDCTemp > fanOnTemp || chargerTempCH > fanOnTemp || avgInverterTemp > fanOnTemp)
     {
       if (fanState == 0)
       {
         digitalWrite(OUT6, HIGH);
+        Serial.println("FAN ON");
         fanState = 1;
       }
     }
-    else if ((DCDCTemp && chargerTempCH && avgInverterTemp && avgMotorTemp) < (fanOnTemp - 5))
+    else if (DCDCTemp < (fanOnTemp - 5) && chargerTempCH < (fanOnTemp - 5) && avgInverterTemp < (fanOnTemp - 5))
     {
       if (fanState == 1)
       {
         digitalWrite(OUT6, LOW);
+        Serial.println("FAN OFF");        
         fanState = 0;
       }
     }
 
-    // Send To Temp Gaauge
-    uint8_t tempGauge = (DCDCTemp + avgMotorTemp + avgInverterTemp) / 3;
-    tempGauge = map(tempGauge, 0, 100, tempGaugeMin, tempGaugeMax);
-    //analogWrite(OUT9, tempGauge);
   }
 }
+
 
 void Speedo()
 {
@@ -1668,15 +1730,15 @@ void loadDefault() // Load the defaul values
 {
   tempGaugeMin = 18;  // Temp Gauge min PWM
   tempGaugeMax = 128; // Temp Gauge Max PWM
-  chargerstop = 388; // stop charger
-  pumpOnTemp = 30;
-  fanOnTemp = 30;
+  chargerstop = 392; // stop charger
+  pumpOnTemp = 40;
+  fanOnTemp = 40;
   Heater_temp = 65; // default heater temp
-  maxTorque = 2000;      // Not used curently
+  maxTorque = 2200;      // Not used curently
   minTorque = 0;        // Not used  curently
   tpslowOffset = 1700;  // Value when i just put my foot on the pedal and push a bit when reading the offset
   tpshighOffset = 4080; // Value when pedal fully pressed 
-  torqueIncrement = 20; // Value to ramp tourqe by
+  torqueIncrement = 5; // Value to ramp tourqe by
   active_map = 3;
 
   Serial.println("Loaded Default Vlues");
@@ -1733,9 +1795,9 @@ void stateHandler()
   digitalWrite(OUT7, LOW);
   digitalWrite(OUT8, LOW);
   digitalWrite(OUT9, LOW);
-  digitalWrite(OUT10, HIGH);
-  digitalWrite(OUT11, LOW);
-  digitalWrite(OUT12, LOW);
+  digitalWrite(OUT10, HIGH); //
+  digitalWrite(OUT11, LOW); // Error light
+  digitalWrite(OUT12, LOW); // Voltage light
   digitalWrite(LEDpin, LOW);
     }
 
@@ -1796,8 +1858,8 @@ void stateHandler()
     {
       if ((digitalRead(OUT2) == LOW) && (digitalRead(OUT3) == LOW))
       {
-        digitalWrite(OUT11, HIGH); // Voltage light on during during precharge
-        digitalWrite(OUT10, HIGH); // Error light on during precharge    
+        digitalWrite(OUT11, HIGH); //Voltage  light on during during precharge
+        digitalWrite(OUT10, HIGH); //Error  light on during precharge    
         digitalWrite(OUT2, HIGH);
 
         Serial.println("PreCharge On!...");
@@ -1809,8 +1871,8 @@ void stateHandler()
     {
        if ((motorHVbatteryVolts >= chargerHVbattryVolts - 5.0) && (digitalRead(OUT3) == LOW)) // Check that the preCharge has finished
       {
-        digitalWrite(OUT11, LOW); // Voltage light off during during precharge
-        digitalWrite(OUT10, LOW); // Error light off during precharge    
+        digitalWrite(OUT11, LOW); //Voltage  light off during during precharge
+        digitalWrite(OUT10, LOW); //Error  light off during precharge    
         digitalWrite(OUT3, HIGH); // Turn on drive Contactor
         Serial.println("Main On!...");
         pretimer1 = millis();
@@ -1820,8 +1882,9 @@ void stateHandler()
     if ((pretimer1 + 500 < millis()) && (digitalRead(OUT2) == HIGH) && (digitalRead(OUT3) == HIGH))
     {
         digitalWrite(OUT2, LOW);
-        digitalWrite(OUT11, LOW); // Voltage light during during precharge on
-        digitalWrite(OUT10, HIGH); // Error light off during precharge    
+        digitalWrite(OUT11, LOW); //Voltage  light during during precharge off
+        digitalWrite(OUT10, HIGH); // Error light on during precharge    
+
       Serial.println("PreCharge OFF!...");
       digitalWrite(OUT8, HIGH); // DC-DC Enable on
       Serial.println("DC-DC Enabled...");
@@ -1850,13 +1913,13 @@ void stateHandler()
     {
       if (preChargeRiseTime < 500)
       {
-        digitalWrite(OUT11, LOW); // Voltage light during during precharge on
-        digitalWrite(OUT10, HIGH); // Error light off during precharge            
+        digitalWrite(OUT11, LOW); //Voltage light during during precharge off
+        digitalWrite(OUT10, HIGH); //Error  light on during precharge            
       }
       if (preChargeRiseTime >= 500)
       {
-        digitalWrite(OUT11, LOW); // Voltage light during during precharge off
-        digitalWrite(OUT10, LOW); // Error light off during precharge    
+        digitalWrite(OUT11, LOW); //Voltage light during during precharge off
+        digitalWrite(OUT10, LOW); //Error light off during precharge    
       }
 
       if (motorRPM < 100)
@@ -1898,6 +1961,8 @@ void stateHandler()
 //tone(OUT9, 3000);    
 //Speedo();  // speedo     
 HeaterComms();
+PumpCheck();
+TempCheck();
 
    if (digitalRead(ISO_IN5) == LOW)  {
   digitalWrite(OUT5, HIGH);
@@ -1943,30 +2008,31 @@ BMS_Status = 2;
         VCUstatusChangeCounter++;
       }
     }
-
+/*
       if (fanState == 0)
       {
         digitalWrite(OUT6, HIGH);
         fanState = 1;
       }
+*/
 
     readPedal();
     BMS_keyOn = 1; // Key on for BMS
 
+    tacho();
+
+     // See if voltage is enough
 if (( chargerHVbattryVolts <  316) && (chargerHVbattryVolts >  288) ) {
-  digitalWrite(OUT11, LOW); // Voltage light 
-  digitalWrite(OUT10, HIGH); // Error light on if HV too low   
+        turtlemode = true; // Turtle mode, alowed motor torque is reduced!
 }
 
 else if ( chargerHVbattryVolts <=  288)    {
-  inverterFunction = 0x00;      // disable the inverter
-        VCUstatusChangeCounter = 0;
-        VCUstatus = 7;
+  VCUstatusChangeCounter = 0;
+  VCUstatus = 7; //Error state ON!
 }
 
 else {
-  digitalWrite(OUT11, LOW); // Voltage light
-  digitalWrite(OUT10, LOW); // Error light
+  turtlemode = false;
 }
 
   if (digitalRead(OUT4) == LOW)     {
@@ -1992,14 +2058,16 @@ else {
     idx_k = k;
     idx_j = j;
 
-     if ( map3 == 0)
-    {
-      active_map = 1;
-          // digitalWrite(OUT6, HIGH); // Fan on   
+  
+    if ( map3 == 0)  {  
+      //turtlemode = true;
+      active_map = 1; // regen off mode  
     }
-     else
-    {
+
+    else   {
       active_map = 3;
+      digitalWrite(OUT11, LOW); //Error  light off
+      digitalWrite(OUT10, LOW); //Voltage  light off 
     }
 
     switch (active_map)
@@ -2088,7 +2156,8 @@ else {
 //Speedo();  // speedo 
 inverterComms();
 HeaterComms();
-
+PumpCheck();
+TempCheck();
 
    if (digitalRead(ISO_IN5) == LOW)  {
   digitalWrite(OUT5, HIGH);
@@ -2145,7 +2214,6 @@ BMS_Status = 2;
       {
         VCUstatusChangeCounter = 0;
         VCUstatus = 4;
-
       }
       else
       {
@@ -2156,32 +2224,33 @@ BMS_Status = 2;
     readPedal();
     BMS_keyOn = 1;             // enable the inverter
 
+ // See if voltage is enough
 if (( chargerHVbattryVolts <  316) && (chargerHVbattryVolts >  288) ) {
-  digitalWrite(OUT11, LOW); // Voltage light 
-  digitalWrite(OUT10, HIGH); // Error light on if HV too low   
+  turtlemode = true; // Turtle mode, alowed motor torque is reduced!
 }
 
 else if ( chargerHVbattryVolts <=  288)    {
-  inverterFunction = 0x00;      // disable the inverter
-        VCUstatusChangeCounter = 0;
-        VCUstatus = 7;
+VCUstatusChangeCounter = 0;
+VCUstatus = 7; //Error state ON!
 }
 
 else {
-  digitalWrite(OUT11, LOW); // Voltage light
-  digitalWrite(OUT10, LOW); // Error light
+turtlemode = false;
+active_map = 1;
+  digitalWrite(OUT11, LOW); //Error  light off
+  digitalWrite(OUT10, LOW); //Voltage  light off 
 }
 
   if (digitalRead(OUT4) == LOW)     {
       digitalWrite(OUT4, HIGH); // Turn on the power steering ignition
     }
-
+/*
       if (fanState == 0)
       {
         digitalWrite(OUT6, HIGH);
         fanState = 1;
       }
-
+*/
     if (throttlePosition > 5)
     {
       torqueRequest = throttlePosition * 16; // lets make the pedal less responsive * 16
@@ -2199,6 +2268,8 @@ else {
 //Speedo(); // speedo 
 inverterComms();
 HeaterComms();
+PumpCheck();
+TempCheck();
 
    if (digitalRead(ISO_IN5) == LOW)  {
   digitalWrite(OUT5, HIGH);
@@ -2332,25 +2403,10 @@ else {
       digitalWrite(OUT4, LOW); // Turn off the power steering ignition
     }
 
-if (chargerTempCH > fanOnTemp)
-    {
-      if (fanState == 0)
-      {
-        digitalWrite(OUT6, HIGH);
-        fanState = 1;
-      }
-    }
-    else if (chargerTempCH < (fanOnTemp - 5))
-    {
-      if (fanState == 1)
-      {
-        digitalWrite(OUT6, LOW);
-        fanState = 0;
-      }
-    }
-
 HeaterComms();
 EvseStart(); //start charging if precharge is done and BMS is in correct state
+PumpCheck();
+TempCheck();
 
       }
       else if (BMS_Status != 3)
@@ -2387,9 +2443,9 @@ EvseStart(); //start charging if precharge is done and BMS is in correct state
     inverterFunction = 0x00;
     if (timer1000_1.check() == 1)
         {
-          digitalWrite(OUT11, !digitalRead(OUT11)); // Flash the Green LED
+          digitalWrite(OUT11, !digitalRead(OUT11)); // Flash the Error LED
         }
-    digitalWrite(OUT10, HIGH); // Error light on during precharge    
+    digitalWrite(OUT10, HIGH); // Voltage light on 
     Serial.println("ERROR !!!");
 
     break;
