@@ -58,3 +58,42 @@ void turtle_mode(), this will only give small torque when battery is low. It wil
 
 Charging control loop is simple: VCU looks to 0x389 id and in byte0 is HV voltage report compressed into single byte value. 
 I use code comparator and when i am near my selected threshold value i slow charger down to 3A. Then when i reach threshold i stop charger. This means my charger is accurate to 2V difference... example to 388Vdc, 390Vdc or 392Vdc. But it is enough to be accurate. I am running this code for 2 years now and in several cars. I also read EVSE AC current and compare it to DC current.
+
+31rd August 25
+Inputs and outputs are redefined.....
+// Define Outputs
+#define OUT1 6    // Ignition is started
+#define OUT2 9    // PRE Charge Contactor
+#define OUT3 10   // HV Drive Contactor
+#define OUT4 11   // Power steering pump 
+#define OUT5 12   // Heater Pump
+#define OUT6 24   // FAN control
+#define OUT7 25   // RPM signal
+#define OUT8 28   // DC-DC Enable
+#define OUT9 29   // Temp Gauge signal
+#define OUT10 33  // Oil LED
+#define OUT11 36  // Voltage LED
+#define OUT12 37  // Reverse Lights
+#define LEDpin 13 // Builtin LED
+
+// Define Inputs
+#define ISO_IN1 2  // FWD
+#define ISO_IN2 3  // START
+#define ISO_IN3 4  // BRAKE
+#define ISO_IN4 5  // REV
+#define ISO_IN5 26 // HEATER *
+#define ISO_IN6 27 // MAP 3 SPORT
+#define ISO_IN7 32 // IGNITION
+#define ISO_IN8 21 // PP DETECT
+
+#define POT_A 41 // POT A
+#define POT_B 39 // POT B
+
+Redefined 3 throttle maps.
+Map1 is without regen for winter use. it is active if I press "sport" switch. 
+Map3 is active first with full regen and sport function, i inverted sport switch function
+Map2 I use only for low battery and error events. 
+void turtle_mode(), this will only give small torque when battery is low. It will get signal from can bus function or external from BMS.
+
+Charging control loop is simple: VCU looks to 0x389 id and in byte0 is HV voltage report compressed into single byte value. 
+I use code comparator and when i am near my selected threshold value i slow charger down to 3A. Then when i reach threshold i stop charger. This means my charger is accurate to 2V difference... example to 388Vdc, 390Vdc or 392Vdc. But it is enough to be accurate. I am running this code for 2 years now and in several cars. I also read EVSE AC current and compare it to DC current.
