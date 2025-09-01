@@ -18,6 +18,100 @@
   CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
   TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
   SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Mitsubishi Inverter Commands
+0x371 30, 00, 00, 00, 00, 00, 00, 00
+0x286
+Byte[0]=0x00
+Byte[1]=0x00 //seems to only change a small amount. picking a common value
+Byte[2]=0x00
+Byte[3]=0x3d
+Byte[4]=0x00
+Byte[5]=0x00
+Byte[6]=0x21
+Byte[7]=0x00
+
+0x287 Torque Command 0x2710=0Nm=10000 decimal, torque band = +/- 200nm 200/10000=0.02nm/bit
+Byte[0]=TorqueHi //front motor torque part 1
+Byte[1]=TorqueLo //front motor torque part 2
+Byte[2]=TorqueHi //rear motor torque part 1 0x2710=10000=0NM
+Byte[3]=TorqueLo //rear motor torque part 2
+Byte[4]=TorqueHi //generator torque part 1
+Byte[5]=TorqueLo //generator torque part 2
+Byte[6]=function
+//0x00,0x02=no inverter response to torque
+//0x03=rear motor responds to torque
+//0x04=generator only responds to torque
+//0x05=generator and front motor respond to torque.
+Byte[7]=0x00;
+
+Mitsubishi Inverter Reports
+0x289 8bytes at 100ms
+B0+B1 = torque report = ((H*256+L)-10000)/10
+B2+B3 = RPM report = ((H*256+L)-20000)
+B4+B5 = HV report = ((H*256+L))
+B7 = RSDN pin status = 04 – not connected, 00 – connected
+
+0x299 8bytes at 100ms
+B0 = Peak motor temp B-40 [°C]
+B1 = motor temp B-40 [°C]
+B4 = motor temp B-40 [°C]
+
+0x732 8bytes at 100ms
+B0+B1 = motor current 1 report Ia= ((H*256+L)-1000)
+B2+B3 = motor current 2 report Ib= ((H*256+L)-1000)
+B4 = rotor angle report
+
+Mitsubishi charger/DCDC
+0x377 8bytes DC-DC converter status
+  B0+B1 = 12V Battery voltage (h04DC=12,45V -> 0,01V/bit)
+  B2+B3 = 12V Supply current  (H53=8,3A -> 0,1A/bit)
+  B4 =  Temperature 1   (starts at -40degC, +1degC/bit)
+  B5 =  Temperature 2   (starts at -40degC, +1degC/bit)
+  B6 =  Temperature 3   (starts at -40degC, +1degC/bit)
+  B7 =  Statusbyte    (h20=standby, h21=error, h22=in operation)
+  bit0(LSB) = Error
+`   bit1    = In Operation
+    bit3      =
+    bit4      =
+    bit5      = Ready
+    bit6    =
+    bit7(MSB) =
+
+0x389 Charger status
+  B0 = HV-Batteryvoltage    (hAB=342V -> 2V/bit)
+  B1 = AC-Mains voltage     (hE2=226V -> 1V/bit)
+  B2 = DC-charge current (1?) (h5B=9,1A -> 0,1A/bit
+  B3 = Temperature 1    (starts at -40degC, +1degC/bit)
+  B4 = Temperature 2    (starts at -40degC, +1degC/bit)
+  B5 = Statusbyte     (CA while charging)    bit0(LSB) =
+`   bit1    = Mains voltage present
+    bit2      =
+    bit3      = Charging
+    bit4      = Error (no CAN messages received)
+    bit5      =
+    bit6    = DC-DC converter request active
+    bit7(MSB) = 1KHz pilot present  
+  B6 = AC-Mains current     (h91=14,5A -> 0,1A/bit)
+  B7 = DC-charge current (2?) (same as B3, sometimes differs by 0,1A)
+
+Mitsubishi Heater
+0x398 8bytes at 100ms
+B0 = 00->01 as soon as 0x285h is received
+B1 = seems to be current report [Current = dec value/10]
+B2 = could be power applied. It certainly changes fast enough with current.
+B3 = seems to be inlet temperature [temp=dec value-40]
+B4 = seems to be outlet temperature [temp=dec value-40]
+B7 = h70 when HV is <175Vdc, h00 when HV >175Vdc. So 175V seems to be the low-voltage limit
+
+Mitsubishi AC compressor
+0x388 8Bytes at 100ms
+B0 = status, 7C start, 02 no power, 01 power present.
+B2 = RPM report high byte
+B3 = RPM report low byte
+b4 = seems to be amp flow [current=dec value/10]
+B7 = CAN status 00-No CAN, 01-CAN error, 02-heartbeat 0x285 present.
+
 */
 
 #include <Arduino.h>
@@ -58,17 +152,18 @@ void canRX_389(const CAN_message_t &msg); // Outlander Charger HV stats
 void canRX_398(const CAN_message_t &msg); // Outlander Heater stats
 void canRX_732(const CAN_message_t &msg); // Inverter Current
 void canRX_733(const CAN_message_t &msg); // Inverter Temps
+void canRX_388(const CAN_message_t &msg); // Outlander AC compressor stats
 
 void bmsComms();                          // Comms to the BMS - Set Key on
 void dogFood();
-void tacho();
 void BMS_Read(); 
 void menu();
 void readPins();
 void readPedal();
 void inverterComms();
 void EvseStart();
-void PumpCheck(); 
+void tempON();  
+void PumpCheck();
 void TempCheck();
 void Speedo();
 void showInfo();
@@ -77,6 +172,8 @@ void saveVarsToEEPROM();
 void stateHandler();
 void HeaterComms();
 void turtle_mode();
+void crankwheel();
+void ACcompressorComms();
 
 // Timer for BMS heartbeat
 IntervalTimer BMStimer;
@@ -88,9 +185,10 @@ Metro timer50_1 = Metro(30);     // inverter timer
 Metro timer50_2 = Metro(50);     // De-bounce check
 Metro timer100_1 = Metro(100);   // 2nd inverter timer
 Metro timer100_2 = Metro(96);    // longer Debounce
-Metro timer100_3 = Metro(105);   // pump handler
+Metro timer100_3 = Metro(105);   // Temp handler
 Metro timer100_4 = Metro(102);   // Speedo handler
-Metro timer100_5 = Metro(98);    // temp handler 
+Metro timer100_5 = Metro(98);    // Pump handler
+Metro timer100_6 = Metro(103);    // Temp handler
 Metro timer500_1 = Metro(50);    // pedal debug timer
 Metro timer500_2 = Metro(500);    // Charger timer
 Metro timer5_1 = Metro(5);    // BMS_Stat *
@@ -126,9 +224,9 @@ FilterOnePole lowpassFilter(LOWPASS, filterFrequency);
 #define OUT4 11   // Power steering pump 
 #define OUT5 12   // Heater Pump
 #define OUT6 24   // FAN control
-#define OUT7 25   // RPM signal
-#define OUT8 28   // DC -DC Enable
-#define OUT9 29   // Temp Gauge signal
+#define OUT7 25   // 
+#define OUT8 28   // DC-DC Enable
+#define OUT9 29   // Tacho signal
 #define OUT10 33  // Oil LED
 #define OUT11 36  // Voltage LED
 #define OUT12 37  // Reverse Lights
@@ -141,11 +239,11 @@ FilterOnePole lowpassFilter(LOWPASS, filterFrequency);
 #define ISO_IN4 5  // REV
 #define ISO_IN5 26 // HEATER *
 #define ISO_IN6 27 // MAP 3 SPORT
-#define ISO_IN7 32 // IGNITION
+#define ISO_IN7 32 // AC compressor signal
 #define ISO_IN8 21 // PP DETECT
 
 #define POT_A 41 // POT A
-#define POT_B 39 // POT B
+#define POT_B 40 // POT B
 
 // VCU Staus
 
@@ -170,7 +268,7 @@ int flag1=0; //*
 
 uint8_t start = 1;
 uint8_t ppDetect = 1;    // Prox pilot pin
-uint8_t ignition = 1;    // ignition
+uint8_t ACcompressor = 1;    // AC compressor
 uint8_t dir_FWD = 1;     // Drive Switch is set to forward
 uint8_t dir_REV = 1;     // DRIVE Sitch is to Reverse
 uint8_t dir_NEUTRAL = 0; // Set Neutral as the default state
@@ -194,12 +292,14 @@ int BMS_discurrent;
 unsigned long pretimer1 = 0;
 unsigned long pretimer2 = 0;
 unsigned long preChargeRiseTime = 0;
+unsigned long relaytimer = 0;
 
 int chargerHVbattryVolts = 0;
 int chargerACvolts = 0;
 float charger12vbattryVolts = 0;
 float charger12vCurrent = 0;
-
+float ACrpm = 0;
+int ACstatus = 0;
 int Heatertemp = 0;
 int Heatertemp1 = 0;
 int Heatertemp2 = 0;
@@ -253,6 +353,7 @@ uint8_t menuLoad = 0;
 uint8_t showStats = 1;
 uint8_t pumpState = 0;
 uint8_t fanState = 0;
+uint8_t ACState = 0;
 // EEPROM Stored Vars
 
 uint8_t tempGaugeMin = EEPROM.read(1); // Temp Gauge min PWM  
@@ -277,9 +378,7 @@ uint8_t map3;           // Sport MAp
 //Tacho constants
 const int tachoPin = OUT9;     // Pin used for tacho signal
 const int teethCount = 60;
-const int missingTeeth = 2;
-
-const float rpm = 800.0;
+const float rpm = 1000.0;
 const float revPerSec = rpm / 60.0;
 const float revPeriodMs = 1000.0 / revPerSec; // Period of one revolution in ms
 const float toothPeriodMs = revPeriodMs / teethCount; // Time per tooth
@@ -287,8 +386,13 @@ const float toothPeriodMs = revPeriodMs / teethCount; // Time per tooth
 volatile int currentTooth = 0;
 bool canMessageReceived = false;
 
-//Metro timer
-Metro tachoMetro(toothPeriodMs); // timer for tacho
+// Pulse duration in microseconds (short spike)
+const unsigned int pulseWidthMicros = 100;  // Adjustable if ECU requires longer pulses
+
+// Metro timer
+Metro tachoMetro = Metro(toothPeriodMs);
+
+int toothIndex = 0;      // Current index (0 to 60)
 
 // Define constants
 // speed = wheelsRPM * tireD * PI * 60 / 1000 Km/h
@@ -419,6 +523,7 @@ void setup()
   Can2.onReceive(MB5, canRX_299); // Inverter Temps
   Can2.onReceive(MB6, canRX_732); // Inverter current
   Can2.onReceive(MB7, canRX_733); // Inverter Temps
+  Can2.onReceive(MB8, canRX_388); // AC compressor HV Stats
   
   Can2.setMBFilter(MB0, 0x377);
   Can2.setMBFilter(MB1, 0x38A);
@@ -428,6 +533,7 @@ void setup()
   Can2.setMBFilter(MB5, 0x299);
   Can2.setMBFilter(MB6, 0x732);
   Can2.setMBFilter(MB7, 0x733);
+  Can2.setMBFilter(MB8, 0x388);
 
   Can2.mailboxStatus();
 
@@ -467,7 +573,7 @@ void setup()
   pinMode(ISO_IN4, INPUT); // REV
   pinMode(ISO_IN5, INPUT); // Heater
   pinMode(ISO_IN6, INPUT); // Map 1 
-  pinMode(ISO_IN7, INPUT); // IGN
+  pinMode(ISO_IN7, INPUT); // AC compressor signal
   pinMode(ISO_IN8, INPUT); // PP Detect
  // pinMode(enablePin, INPUT);
 
@@ -496,8 +602,8 @@ void setup()
   config.timeout = 5; // in seconds, 0->128
   config.callback = wdtCallback;
   wdt.begin(config);
-  BMStimer.begin(bmsComms, 30000);
-  Speedread.begin(Speedo, 100000);
+  BMStimer.begin(bmsComms, 30000); 
+  //Speedread.begin(Speedo, 100000);
 
   Serial.begin(9600);
   Serial.println("Mini-E VCU Starting Up.....");
@@ -539,14 +645,7 @@ void loop()
     }
   }
 
-
- if (Heater_pin == 0)  {
-  digitalWrite(OUT5, HIGH);
-}
-else {
-  digitalWrite(OUT5, LOW);
-}
-
+/*
   if (timer30s_1.check()==1)  //Check the DC-DC so we only enable when needed.
   {
     if (charger12vbattryVolts > 13.6) //Greater than 12.6 volts probably menas not much load let's check
@@ -560,7 +659,7 @@ else {
     {
       digitalWrite(OUT8, HIGH);
     }
-  }
+  } */
 //////////////////////////////////////////////////////////////////////////// setup to stop charging when at HV limit 
   if (chargerHVbattryVolts > chargerstop)  { // if HV is at limit
       chargerHV = true; 
@@ -729,24 +828,6 @@ Serial.println(value);
 menuLoad = 0;
 break; }
 
- /* case '8':
-  {
-    int value = Serial.parseInt();
-    if (value > 1000)
-    {
-      value = 0;
-    }
-    if (value < 0)
-    {
-      value = 0;
-    }
-     = value;
-    Serial.print("Regen Toruqe: ");
-    Serial.println(value);
-    menuLoad = 0;
-
-    break;
-  } */
 
   case '9':
   {
@@ -853,13 +934,13 @@ break; }
     {
       pumpState = 2; // 2 = Debug
       digitalWrite(OUT5, HIGH);
-      Serial.print("PUMP ON");
+      Serial.println("PUMP ON");
     }
     else
     {
       pumpState = 0;
       digitalWrite(OUT5, LOW);
-      Serial.print("PUMP OFF");
+      Serial.println("PUMP OFF");
     }
     break;
 
@@ -929,8 +1010,8 @@ break; }
     Serial.println(ppDetect);
     Serial.print("ISO 6 - SPORT:");
     Serial.println(map3);
-    Serial.print("ISO 7 - IGITION:");
-    Serial.println(ignition);
+    Serial.print("ISO 7 - ACcompressor:");
+    Serial.println(ACcompressor);
     Serial.print("Thotle POT A:");
     Serial.print(result.result_adc0);
     Serial.print(" , Thotle POT B:");
@@ -955,25 +1036,6 @@ break; }
   }
 }
 
-void tacho() {
-  if (tachoMetro.check()) {
- // if ((VCUstatus == 3) && (canMessageReceived == true)) {
-    if (currentTooth < (teethCount - missingTeeth)) {
-      digitalWrite(tachoPin, HIGH);
-      delayMicroseconds(100); // Pulse width ~100us
-      digitalWrite(tachoPin, LOW);
-    }
-    // else: missing tooth region, no pulse
-
-    currentTooth++;
-    if (currentTooth >= teethCount) {
-      currentTooth = 0;
-     // canMessageReceived = false; // Reset for next revolution
-    }
-  }
-}
-
-
 void readPins()
 {
 
@@ -983,7 +1045,7 @@ void readPins()
   dir_REV = digitalRead(ISO_IN4);
   Heater_pin = digitalRead(ISO_IN5);
   map3 = digitalRead(ISO_IN6);
-  ignition = digitalRead(ISO_IN7);
+  ACcompressor = digitalRead(ISO_IN7);
   ppDetect = digitalRead(ISO_IN8);
 
  }
@@ -1198,6 +1260,12 @@ void canRX_377(const CAN_message_t &msg)
   chargerTemp3 = msg.buf[6] - 40;
   chargerStatus = msg.buf[7];
   DCDCTemp = (chargerTemp1 + chargerTemp2 + chargerTemp3) / 3;
+}
+
+void canRX_388(const CAN_message_t &msg)
+{
+  ACstatus = msg.buf[0];  
+  ACrpm = float(((msg.buf[2] * 256) + msg.buf[3]));
 }
 
 void canRX_389(const CAN_message_t &msg)
@@ -1470,6 +1538,25 @@ void inverterComms()
   }
 }
 
+
+
+void crankwheel() {
+  if (tachoMetro.check()) {
+    // Emit pulses for 0–56 and 58; skip 57, 59, 60
+    if ((toothIndex >= 0 && toothIndex <= 56) || toothIndex == 58) {
+      digitalWrite(tachoPin, HIGH);
+      delayMicroseconds(pulseWidthMicros);
+      digitalWrite(tachoPin, LOW);
+    }
+
+    // Advance to next index
+    toothIndex++;
+    if (toothIndex >= 61) {
+      toothIndex = 0;
+    }
+  }
+}
+
 void turtle_mode() {
 if (turtlemode == true) { // put the car in turtle mode
   active_map = 2;
@@ -1516,8 +1603,6 @@ if (BMS_discurrent > 0)
 }
 }
 
-
-
 void HeaterComms()
 {
   if (timer100_2.check() == 1)
@@ -1533,15 +1618,15 @@ else {
 }
     msg.buf[1] = 0x50; // byte1 20 to 50 works
 if (Heatertemp >= Heater_temp) {
-    msg.buf[2] = 0x00; //Heater off when at 65deg   
+    msg.buf[2] = 0x00; // Heater off when at 65deg   
 }    
 else if (Heatertemp > (Heater_temp - 5)) {
-    msg.buf[2] = 0x32; //Heater at 1/2 when at 60deg   
+    msg.buf[2] = 0x32; // Heater at 1/2 when at 60deg   
 }    
 else {
-    msg.buf[2] = 0xA2; //Heater on at full power (dec/10)
+    msg.buf[2] = 0xA2; // Heater on at full power (dec/10)
 }    
-    msg.buf[3] = 0x36; // byte3 30 to 40 works
+    msg.buf[3] = 0x40; // byte3 30 to 40 works
     msg.buf[4] = 0;
     msg.buf[5] = 0;
     msg.buf[6] = 0;
@@ -1550,6 +1635,35 @@ else {
 
 }    
 }  
+
+void ACcompressorComms()  {
+  if (timer100_3.check() == 1)  {
+    msg.id = 0x185;
+    msg.len = 8;
+    if (digitalRead(ISO_IN7) == LOW) {
+    msg.buf[0] = 0x0B; } // byte0 status command AC pin is on
+else {
+    msg.buf[0] = 0x08; }// Heater pin is off
+
+    msg.buf[1] = 0x00; 
+    msg.buf[2] = 0x1D; 
+    msg.buf[3] = 0x00;
+    msg.buf[4] = 0x00; 
+    if (digitalRead(ISO_IN7) == LOW) {
+        if (ACrpm <= 4000) { // Full power for spinup  
+    msg.buf[5] = 0x35;  } // RPM command 08 to 54   
+        else if ((ACrpm > 3800) && (ACrpm <= 4500)) { // power is reduced 
+    msg.buf[5] = 0x25; } // RPM command 08 to 54   
+        else if (ACrpm > 4800) { // power is reduced 
+    msg.buf[5] = 0x20; } // RPM command 08 to 54 
+  } 
+        else {
+    msg.buf[5] = 0x00; } //AC pin is inactive
+
+    msg.buf[6] = 0x00;
+    msg.buf[7] = 0x03;
+    Can2.write(msg);  
+}}  
 
 void bmsComms()
 {
@@ -1577,8 +1691,19 @@ void bmsComms()
     Can2.write(msg);
 }
 
+void tempON() {
+if (digitalRead(ISO_IN2) == LOW)  {
+      digitalWrite(OUT6, HIGH); // Turn on the power steering ignition
+      fanState = 1;   
+    }
+  
+ else {
+       digitalWrite(OUT6, LOW); // Turn on the power steering ignition
+       fanState = 0;   
+ } }
+
 void PumpCheck() {
-  if (timer100_3.check() == 1)
+  if (timer100_5.check() == 1)
   {
     if (Heatertemp > pumpOnTemp) // Temp Handling
     {
@@ -1602,10 +1727,10 @@ void PumpCheck() {
 }
 
 void TempCheck() {
-  if (timer100_5.check() == 1)
+  if (timer100_6.check() == 1)
   {
 
-    if (DCDCTemp > fanOnTemp || chargerTempCH > fanOnTemp || avgInverterTemp > fanOnTemp)
+    if (DCDCTemp > fanOnTemp || chargerTempCH > fanOnTemp || avgInverterTemp > fanOnTemp || digitalRead(ISO_IN7) == LOW)
     {
       if (fanState == 0)
       {
@@ -1614,7 +1739,7 @@ void TempCheck() {
         fanState = 1;
       }
     }
-    else if (DCDCTemp < (fanOnTemp - 5) && chargerTempCH < (fanOnTemp - 5) && avgInverterTemp < (fanOnTemp - 5))
+    else if (DCDCTemp < (fanOnTemp - 5) && chargerTempCH < (fanOnTemp - 5) && avgInverterTemp < (fanOnTemp - 5) && digitalRead(ISO_IN7) == HIGH)
     {
       if (fanState == 1)
       {
@@ -1626,7 +1751,6 @@ void TempCheck() {
 
   }
 }
-
 
 void Speedo()
 {
@@ -1783,7 +1907,7 @@ void stateHandler()
   case ready:
   {
 	  
-    if ((BMS_Status == 1) && (ignition == 1) )    
+    if ((BMS_Status == 1)) // && (ignition == 1) )    
      {
 
   digitalWrite(OUT1, LOW);
@@ -1795,13 +1919,13 @@ void stateHandler()
   digitalWrite(OUT7, LOW);
   digitalWrite(OUT8, LOW);
   digitalWrite(OUT9, LOW);
-  digitalWrite(OUT10, HIGH); //
-  digitalWrite(OUT11, LOW); // Error light
-  digitalWrite(OUT12, LOW); // Voltage light
-  digitalWrite(LEDpin, LOW);
+  digitalWrite(OUT10, LOW); //
+  digitalWrite(OUT11, HIGH); // Error light
+  digitalWrite(OUT12, HIGH); // Voltage light
+  //digitalWrite(LEDpin, LOW);
     }
 
-    if ((digitalRead(ISO_IN8) == LOW) && (chargerHV == false)) //PP pin active
+    if ((digitalRead(ISO_IN8) == LOW) && (chargerHV != true)) //PP pin active
     {
       if (VCUstatusChangeCounter > VCUstatusChangeThreshold)
       {
@@ -1820,18 +1944,15 @@ void stateHandler()
     }
 
 
-    if ((start == 0) && (brake_pedal == 0) && (BMS_Status != 5))
-    {
-      if ((dir_FWD == 1) && (dir_REV == 1))
-      {
+    if ((start == 0) && (brake_pedal == 0) && (BMS_Status != 5))     {
+      if ((dir_FWD == 1) && (dir_REV == 1))    {
         BMS_Status = 2;
         digitalWrite(OUT1, HIGH);
         VCUstatus = 3; // Neutral
         Serial.print("VCU Status: ");
         Serial.println(VCUstatus);
       }
-      else
-      {
+      else    {
 		BMS_Status = 1; 		  
         VCUstatusChangeCounter++;
       }
@@ -1841,19 +1962,14 @@ void stateHandler()
 
     case driveNeutral:
   {
-    if (digitalRead(OUT12) == HIGH)
-    {
-      digitalWrite(OUT12, LOW); // Turn off the reversing lights
-    }
-    if (digitalRead(OUT1) == LOW) // Check if Neg Contactor is off then start the sequence
-    {
 
-      digitalWrite(OUT1, HIGH); // Negative Contactor
-      digitalWrite(OUT4, HIGH); // Power steering ignition
-
+    if (digitalRead(OUT1) == LOW)
+    {
+      digitalWrite(OUT1, HIGH); // Brake Relay       
       Serial.println("Negative On!...");
       pretimer1 = millis();
     }
+
     if (pretimer1 + 500 < millis())
     {
       if ((digitalRead(OUT2) == LOW) && (digitalRead(OUT3) == LOW))
@@ -1867,26 +1983,29 @@ void stateHandler()
         pretimer2 = millis();
       }
     }
-    if (pretimer1 + 1000 < millis())
+    if ((pretimer1 + 1000 ) < millis())
     {
-       if ((motorHVbatteryVolts >= chargerHVbattryVolts - 5.0) && (digitalRead(OUT3) == LOW)) // Check that the preCharge has finished
+       if ((chargerHVbattryVolts > 280) && (digitalRead(OUT3) == LOW)) // Check that the preCharge has finished
       {
-        digitalWrite(OUT11, LOW); //Voltage  light off during during precharge
-        digitalWrite(OUT10, LOW); //Error  light off during precharge    
         digitalWrite(OUT3, HIGH); // Turn on drive Contactor
+        digitalWrite(OUT11, HIGH); //Voltage  light on during during precharge
+        digitalWrite(OUT10, LOW); //Error  light off during precharge            
         Serial.println("Main On!...");
         pretimer1 = millis();
       }
     }
 
-    if ((pretimer1 + 500 < millis()) && (digitalRead(OUT2) == HIGH) && (digitalRead(OUT3) == HIGH))
+    if (((pretimer1 + 500 ) < millis()) && (digitalRead(OUT2) == HIGH) && (digitalRead(OUT3) == HIGH))
     {
         digitalWrite(OUT2, LOW);
         digitalWrite(OUT11, LOW); //Voltage  light during during precharge off
         digitalWrite(OUT10, HIGH); // Error light on during precharge    
 
       Serial.println("PreCharge OFF!...");
+
       digitalWrite(OUT8, HIGH); // DC-DC Enable on
+      digitalWrite(OUT4, HIGH); // Turn on the power steering ignition
+
       Serial.println("DC-DC Enabled...");
       Serial.print("VCU Status: ");
       Serial.println(VCUstatus);
@@ -1899,7 +2018,7 @@ void stateHandler()
     if ((digitalRead(OUT3) == LOW) && (digitalRead(OUT2) == HIGH))
     {
 
-      if (motorHVbatteryVolts >= chargerHVbattryVolts - 5.0)
+      if (chargerHVbattryVolts > 280)
       {
         if (preChargeRiseTime == 0)
         {
@@ -1960,23 +2079,19 @@ void stateHandler()
     }
 //tone(OUT9, 3000);    
 //Speedo();  // speedo     
+//tempON(); 
+crankwheel();
+ACcompressorComms();
 HeaterComms();
-PumpCheck();
+PumpCheck();  
 TempCheck();
-
-   if (digitalRead(ISO_IN5) == LOW)  {
-  digitalWrite(OUT5, HIGH);
-}
-else {
-  digitalWrite(OUT5, LOW);
-}
 
     if (BMS_Status != 2) {
 BMS_Status = 2;
     }
 
-      // Check for ISO_IN7 ignition inactivity
-   if ((digitalRead(ISO_IN1) == HIGH) && (digitalRead(ISO_IN4) == HIGH) && (digitalRead(ISO_IN7) == HIGH))
+      // Check for ignition inactivity
+   if ((digitalRead(ISO_IN1) == HIGH) && (digitalRead(ISO_IN4) == HIGH) && (digitalRead(ISO_IN2) == HIGH) && (motorRPM < 100))
       {
      if (VCUstatusChangeCounter > VCUstatusChangeThreshold)
       {
@@ -2008,18 +2123,11 @@ BMS_Status = 2;
         VCUstatusChangeCounter++;
       }
     }
-/*
-      if (fanState == 0)
-      {
-        digitalWrite(OUT6, HIGH);
-        fanState = 1;
-      }
-*/
+
 
     readPedal();
     BMS_keyOn = 1; // Key on for BMS
 
-    tacho();
 
      // See if voltage is enough
 if (( chargerHVbattryVolts <  316) && (chargerHVbattryVolts >  288) ) {
@@ -2034,6 +2142,10 @@ else if ( chargerHVbattryVolts <=  288)    {
 else {
   turtlemode = false;
 }
+
+if (digitalRead(OUT8) == LOW)  {
+      digitalWrite(OUT8, HIGH); // DC-DC Enable on
+   }
 
   if (digitalRead(OUT4) == LOW)     {
       digitalWrite(OUT4, HIGH); // Turn on the power steering
@@ -2066,8 +2178,6 @@ else {
 
     else   {
       active_map = 3;
-      digitalWrite(OUT11, LOW); //Error  light off
-      digitalWrite(OUT10, LOW); //Voltage  light off 
     }
 
     switch (active_map)
@@ -2153,18 +2263,14 @@ else {
       brakeDelay = 0;
 
     }
-//Speedo();  // speedo 
+//Speedo();  // speedo
+//tempON(); 
+crankwheel();
 inverterComms();
+ACcompressorComms(); 
 HeaterComms();
-PumpCheck();
+PumpCheck();  
 TempCheck();
-
-   if (digitalRead(ISO_IN5) == LOW)  {
-  digitalWrite(OUT5, HIGH);
-}
-else {
-  digitalWrite(OUT5, LOW);
-}
 
  if (BMS_Status != 2) {
 
@@ -2172,8 +2278,8 @@ BMS_Status = 2;
 
     }
 
-      // Check for ISO_IN7 ignition inactivity
-   if ((digitalRead(ISO_IN1) == LOW) && (digitalRead(ISO_IN7) == HIGH))
+      // Check for ignition inactivity
+   if ((digitalRead(ISO_IN2) == HIGH) && (motorRPM < 100))
       {
      if (VCUstatusChangeCounter > VCUstatusChangeThreshold)
       {
@@ -2241,16 +2347,16 @@ active_map = 1;
   digitalWrite(OUT10, LOW); //Voltage  light off 
 }
 
+if (digitalRead(OUT8) == LOW)  {
+      digitalWrite(OUT8, HIGH); // DC-DC Enable on
+   }
+
   if (digitalRead(OUT4) == LOW)     {
       digitalWrite(OUT4, HIGH); // Turn on the power steering ignition
     }
-/*
-      if (fanState == 0)
-      {
-        digitalWrite(OUT6, HIGH);
-        fanState = 1;
-      }
-*/
+
+
+
     if (throttlePosition > 5)
     {
       torqueRequest = throttlePosition * 16; // lets make the pedal less responsive * 16
@@ -2266,25 +2372,20 @@ active_map = 1;
       torqueRequest = 0; // 0 Torque if the brake is presed
     }
 //Speedo(); // speedo 
-inverterComms();
+//tempON(); 
+crankwheel();
+inverterComms();  
+ACcompressorComms(); 
 HeaterComms();
-PumpCheck();
-TempCheck();
-
-   if (digitalRead(ISO_IN5) == LOW)  {
-  digitalWrite(OUT5, HIGH);
-}
-else {
-  digitalWrite(OUT5, LOW);
-}
-
+PumpCheck(); 
+TempCheck(); 
 
     if (BMS_Status != 2) {
 BMS_Status = 2;
     }
 
       // Check for ISO_IN7 ignition inactivity
-    if ((digitalRead(ISO_IN4) == LOW) && (digitalRead(ISO_IN7) == HIGH))
+    if ((digitalRead(ISO_IN2) == HIGH) && (motorRPM < 100))
       {
      if (VCUstatusChangeCounter > VCUstatusChangeThreshold)
       {
@@ -2322,7 +2423,7 @@ BMS_Status = 2;
     }
     if (pretimer1 + 1000 < millis())
     {
-          if ((chargerHVbattryVolts >= motorHVbatteryVolts - 5.0) && (digitalRead(OUT3) == LOW)) // Check that the preCharge has finished
+          if ((chargerHVbattryVolts > 280) && (digitalRead(OUT3) == LOW)) // Check that the preCharge has finished
       {
         digitalWrite(OUT3, HIGH); // Turn on drive Contactor
         Serial.println("Main On!...");
@@ -2335,6 +2436,7 @@ BMS_Status = 2;
       digitalWrite(OUT2, LOW);
       Serial.println("PreCharge OFF!...");
       digitalWrite(OUT8, HIGH); // DC-DC Enable on
+      digitalWrite(OUT4, HIGH); // Turn on the power steering ignition
       Serial.println("DC-DC Enabled...");
       Serial.print("VCU Status: ");
       Serial.println(VCUstatus);
@@ -2345,7 +2447,7 @@ BMS_Status = 2;
     if ((digitalRead(OUT3) == LOW) && (digitalRead(OUT2) == HIGH))
     {
 
-      if (chargerHVbattryVolts >= motorHVbatteryVolts - 5.0)
+      if (chargerHVbattryVolts > 280)
       {
         if (preChargeRiseTime == 0)
         {
@@ -2357,11 +2459,8 @@ BMS_Status = 2;
     // Check the contactor state
     if ((digitalRead(OUT3) == HIGH) && (digitalRead(OUT2) == LOW) && (digitalRead(OUT1) == HIGH))
     {
-      if (BMS_Status == 3)
-      {
-
+      if (BMS_Status == 3)  {
         BMS_keyOn = 0; // Disable the inverter drive
-
         digitalWrite(OUT2, LOW); // We don't want any more smoke!
         if (preChargeRiseTime < 500)
         {
@@ -2374,51 +2473,24 @@ BMS_Status = 2;
         if (timer1000_1.check() == 1)
         {
           digitalWrite(OUT11, !digitalRead(OUT11)); // Flash the Green LED
-        }
-        if (charger12vbattryVolts < 12.6)
-        {
-          digitalWrite(OUT8, HIGH); // DC-DC Enable on (charge the aux battery as well..)
-        }
+        }}}
 
-        if (timer30s_1.check() == 1)
-        { // No need to keep the DC-DC on if the battery is charged
-          if (charger12vCurrent < .5)
-          {
-            digitalWrite(OUT8, LOW);
-          }
-          else 
-          {
-            digitalWrite(OUT8, HIGH);
-          }
-        }
 
-if (digitalRead(ISO_IN5) == LOW)  {
-  digitalWrite(OUT5, HIGH);
-}
-else {
-  digitalWrite(OUT5, LOW);
-}
-
-  if (digitalRead(OUT4) == HIGH)     {
-      digitalWrite(OUT4, LOW); // Turn off the power steering ignition
-    }
-
+//tempON(); 
+ACcompressorComms(); 
 HeaterComms();
-EvseStart(); //start charging if precharge is done and BMS is in correct state
 PumpCheck();
 TempCheck();
+EvseStart(); //start charging if precharge is done and BMS is in correct state
 
-      }
-      else if (BMS_Status != 3)
-      {
+     if (BMS_Status != 3)   {
         if (timer1000_1.check() == 1)
         {
           Serial.println("Waiting for BMS!");
           BMS_keyOn = 0; // Disable the inverter drive
         }
       }
-    }
-	
+    	
 	      // Check for ISO_IN8 PP inactivity
       if ((digitalRead(ISO_IN8) == HIGH) || (chargerHV == true)) // setup to stop charging when at HV limit 
       {
@@ -2447,6 +2519,21 @@ TempCheck();
         }
     digitalWrite(OUT10, HIGH); // Voltage light on 
     Serial.println("ERROR !!!");
+
+      // Check for ignition inactivity
+   if ((digitalRead(ISO_IN1) == HIGH) && (digitalRead(ISO_IN4) == HIGH) && (digitalRead(ISO_IN2) == HIGH) && (motorRPM < 100))
+      {
+     if (VCUstatusChangeCounter > VCUstatusChangeThreshold)
+      {
+        VCUstatusChangeCounter = 0;
+        BMS_Status = 1;
+        VCUstatus = ready;
+      }
+      else
+      {
+        VCUstatusChangeCounter++;
+      }
+      }
 
     break;
   }
